@@ -31,6 +31,56 @@ type Token struct {
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
+func ParseTokenGroups(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(raw, ",")
+	groups := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		group := strings.TrimSpace(part)
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		groups = append(groups, group)
+	}
+	return groups
+}
+
+func NormalizeTokenGroup(raw string) string {
+	groups := ParseTokenGroups(raw)
+	if len(groups) == 0 {
+		return ""
+	}
+	if len(groups) == 1 {
+		return groups[0]
+	}
+	return strings.Join(groups, ",")
+}
+
+func IsAutoTokenGroup(raw string) bool {
+	return NormalizeTokenGroup(raw) == "auto"
+}
+
+func HasMultipleTokenGroups(raw string) bool {
+	return len(ParseTokenGroups(raw)) > 1
+}
+
+func GetPrimaryTokenGroup(raw string) string {
+	groups := ParseTokenGroups(raw)
+	if len(groups) == 0 {
+		return ""
+	}
+	return groups[0]
+}
+
 func (token *Token) Clean() {
 	token.Key = ""
 }
@@ -50,6 +100,22 @@ func MaskTokenKey(key string) string {
 
 func (token *Token) GetFullKey() string {
 	return token.Key
+}
+
+func (token *Token) NormalizeGroup() {
+	token.Group = NormalizeTokenGroup(token.Group)
+}
+
+func (token *Token) GetGroupList() []string {
+	return ParseTokenGroups(token.Group)
+}
+
+func (token *Token) UsesAutoGroup() bool {
+	return IsAutoTokenGroup(token.Group)
+}
+
+func (token *Token) SupportsCrossGroupRetry() bool {
+	return token.UsesAutoGroup() || HasMultipleTokenGroups(token.Group)
 }
 
 func (token *Token) GetMaskedKey() string {

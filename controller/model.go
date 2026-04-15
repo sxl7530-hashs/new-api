@@ -168,12 +168,13 @@ func ListModels(c *gin.Context, modelType int) {
 			group = tokenGroup
 		}
 		var models []string
-		if tokenGroup == "auto" {
-			for _, autoGroup := range service.GetUserAutoGroup(userGroup) {
-				groupModels := model.GetGroupEnabledModels(autoGroup)
-				for _, g := range groupModels {
-					if !common.StringsContains(models, g) {
-						models = append(models, g)
+		orderedGroups, resolveErr := service.ResolveOrderedTokenGroups(userGroup, group)
+		if resolveErr == nil && len(orderedGroups) > 1 {
+			for _, currentGroup := range orderedGroups {
+				groupModels := model.GetGroupEnabledModels(currentGroup)
+				for _, groupModel := range groupModels {
+					if !common.StringsContains(models, groupModel) {
+						models = append(models, groupModel)
 					}
 				}
 			}

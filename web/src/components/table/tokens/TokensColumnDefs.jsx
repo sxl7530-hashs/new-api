@@ -104,6 +104,20 @@ const renderGroupColumn = (text, record, t, groupRatios = {}) => {
       </Tooltip>
     );
   }
+  if (typeof text === 'string' && text.includes(',')) {
+    return (
+      <Tooltip content={t('该令牌会按展示顺序依次尝试这些分组')} position='top'>
+        <span className='flex items-center gap-1'>
+          {renderGroup(text)}
+          {record && record.cross_group_retry ? (
+            <Tag size='small' color='orange' shape='circle'>
+              {t('跨分组')}
+            </Tag>
+          ) : null}
+        </span>
+      </Tooltip>
+    );
+  }
   const ratio = groupRatios[text];
   return (
     <span className='flex items-center gap-1'>

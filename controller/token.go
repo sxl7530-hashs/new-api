@@ -9,7 +9,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,6 +31,51 @@ func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
 		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
 	}
 	return maskedTokens
+}
+
+func normalizeAndValidateTokenGroup(userId int, userGroup string, token *model.Token) error {
+	if token == nil {
+		return fmt.Errorf("token is nil")
+	}
+
+	token.NormalizeGroup()
+	if token.Group == "" {
+		token.CrossGroupRetry = false
+		return nil
+	}
+
+	if userGroup == "" {
+		var err error
+		userGroup, err = model.GetUserGroup(userId, false)
+		if err != nil {
+			return err
+		}
+	}
+
+	if token.UsesAutoGroup() {
+		if !service.GroupInUserUsableGroups(userGroup, token.Group) {
+			return fmt.Errorf("无权访问 %s 分组", token.Group)
+		}
+		return nil
+	}
+
+	groups := token.GetGroupList()
+	for _, group := range groups {
+		if group == "auto" {
+			return fmt.Errorf("auto 分组不能与其他分组同时使用")
+		}
+		if !service.GroupInUserUsableGroups(userGroup, group) {
+			return fmt.Errorf("无权访问 %s 分组", group)
+		}
+		if !ratio_setting.ContainsGroupRatio(group) {
+			return fmt.Errorf("分组 %s 已被弃用", group)
+		}
+	}
+
+	if !token.SupportsCrossGroupRetry() {
+		token.CrossGroupRetry = false
+	}
+	return nil
 }
 
 func GetAllTokens(c *gin.Context) {
@@ -222,6 +269,10 @@ func AddToken(c *gin.Context) {
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
 	}
+	if err = normalizeAndValidateTokenGroup(cleanToken.UserId, c.GetString("group"), &cleanToken); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	err = cleanToken.Insert()
 	if err != nil {
 		common.ApiError(c, err)
@@ -299,6 +350,10 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		if err = normalizeAndValidateTokenGroup(userId, c.GetString("group"), cleanToken); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	err = cleanToken.Update()
 	if err != nil {

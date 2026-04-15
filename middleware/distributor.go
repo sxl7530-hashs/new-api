@@ -81,6 +81,10 @@ func Distribute() func(c *gin.Context) {
 				}
 				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+				selectionGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+				if selectionGroup == "" {
+					selectionGroup = usingGroup
+				}
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
 					playgroundRequest := &dto.PlayGroundRequest{}
@@ -95,6 +99,7 @@ func Distribute() func(c *gin.Context) {
 							return
 						}
 						usingGroup = playgroundRequest.Group
+						selectionGroup = playgroundRequest.Group
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 					}
 				}
@@ -107,22 +112,24 @@ func Distribute() func(c *gin.Context) {
 								abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
 								return
 							}
-						} else if usingGroup == "auto" {
+						} else {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-							autoGroups := service.GetUserAutoGroup(userGroup)
-							for _, g := range autoGroups {
+							orderedGroups, resolveErr := service.ResolveOrderedTokenGroups(userGroup, selectionGroup)
+							if resolveErr != nil || len(orderedGroups) == 0 {
+								orderedGroups = []string{usingGroup}
+							}
+							for _, g := range orderedGroups {
 								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
 									selectGroup = g
-									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+									if model.IsAutoTokenGroup(selectionGroup) {
+										common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+									}
+									common.SetContextKey(c, constant.ContextKeyUsingGroup, g)
 									channel = preferred
 									service.MarkChannelAffinityUsed(c, g, preferred.Id)
 									break
 								}
 							}
-						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-							channel = preferred
-							selectGroup = usingGroup
-							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 						}
 					}
 				}
@@ -131,12 +138,12 @@ func Distribute() func(c *gin.Context) {
 					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
 						Ctx:        c,
 						ModelName:  modelRequest.Model,
-						TokenGroup: usingGroup,
+						TokenGroup: selectionGroup,
 						Retry:      common.GetPointer(0),
 					})
 					if err != nil {
-						showGroup := usingGroup
-						if usingGroup == "auto" {
+						showGroup := selectionGroup
+						if model.IsAutoTokenGroup(selectionGroup) {
 							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
 						}
 						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
@@ -149,8 +156,11 @@ func Distribute() func(c *gin.Context) {
 						return
 					}
 					if channel == nil {
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": selectionGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
+					}
+					if selectGroup != "" {
+						common.SetContextKey(c, constant.ContextKeyUsingGroup, selectGroup)
 					}
 				}
 			}
