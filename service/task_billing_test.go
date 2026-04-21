@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"net/http"
 	"os"
 	"testing"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,6 +46,8 @@ func TestMain(m *testing.M) {
 		&model.Log{},
 		&model.Channel{},
 		&model.UserSubscription{},
+		&model.SubscriptionPlan{},
+		&model.SubscriptionPreConsumeRecord{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -63,6 +68,8 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")
 		model.DB.Exec("DELETE FROM user_subscriptions")
+		model.DB.Exec("DELETE FROM subscription_plans")
+		model.DB.Exec("DELETE FROM subscription_pre_consume_records")
 	})
 }
 
@@ -70,6 +77,33 @@ func seedUser(t *testing.T, id int, quota int) {
 	t.Helper()
 	user := &model.User{Id: id, Username: "test_user", Quota: quota, Status: common.UserStatusEnabled}
 	require.NoError(t, model.DB.Create(user).Error)
+}
+
+func seedUserWithGroup(t *testing.T, id int, quota int, group string) {
+	t.Helper()
+	user := &model.User{
+		Id:       id,
+		Username: "test_user",
+		Quota:    quota,
+		Status:   common.UserStatusEnabled,
+		Group:    group,
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+}
+
+func seedSubscriptionPlan(t *testing.T, id int, title string, supportedGroups string, total int64) *model.SubscriptionPlan {
+	t.Helper()
+	plan := &model.SubscriptionPlan{
+		Id:              id,
+		Title:           title,
+		DurationUnit:    model.SubscriptionDurationMonth,
+		DurationValue:   1,
+		Enabled:         true,
+		TotalAmount:     total,
+		SupportedGroups: supportedGroups,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	return plan
 }
 
 func seedToken(t *testing.T, id int, userId int, key string, remainQuota int) {
@@ -182,9 +216,147 @@ func countLogs(t *testing.T) int64 {
 	return count
 }
 
+func newGinContext() *gin.Context {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	return ctx
+}
+
+func makeBillingRelayInfo(userId int, usingGroup string, billingPreference string, requestId string, tokenId int, tokenKey string) *relaycommon.RelayInfo {
+	return &relaycommon.RelayInfo{
+		UserId:        userId,
+		UsingGroup:    usingGroup,
+		UserGroup:     "",
+		TokenId:       tokenId,
+		TokenKey:      tokenKey,
+		RequestId:     requestId,
+		UserSetting:   dto.UserSetting{BillingPreference: billingPreference},
+		IsPlayground:  true,
+		UserQuota:     0,
+		TokenUnlimited: false,
+	}
+}
+
 // ===========================================================================
 // RefundTaskQuota tests
 // ===========================================================================
+
+func TestNewBillingSession_SubscriptionFirst_UsesMatchingGroupSubscription(t *testing.T) {
+	truncate(t)
+	ctx := newGinContext()
+
+	const userID, tokenID, planID, subID = 100, 100, 1, 1
+	const preConsumed = 200
+	const initUserQuota = 500
+	const tokenRemain = 10000
+	const subTotal int64 = 10000
+
+	seedUser(t, userID, initUserQuota)
+	seedToken(t, tokenID, userID, "sk-test-sub-match", tokenRemain)
+	seedSubscriptionPlan(t, planID, "Group A Plan", `["group-a"]`, subTotal)
+	seedSubscription(t, subID, userID, subTotal, 0)
+	seedChannel(t, 1)
+
+	model.DB.Model(&model.UserSubscription{}).Where("id = ?", subID).Update("plan_id", planID)
+
+	session, apiErr := NewBillingSession(
+		ctx,
+		makeBillingRelayInfo(userID, "group-a", "subscription_first", "sub-match-group", tokenID, "sk-test-sub-match"),
+		preConsumed,
+	)
+	if apiErr != nil {
+		t.Fatalf("new billing session failed: code=%s msg=%s", apiErr.GetErrorCode(), apiErr.Error())
+	}
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceSubscription, session.funding.Source())
+	assert.Equal(t, preConsumed, session.GetPreConsumedQuota())
+	assert.Equal(t, initUserQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, int64(preConsumed), getSubscriptionUsed(t, subID))
+}
+
+func TestNewBillingSession_SubscriptionFirst_UnsupportedGroupFallsBackToWallet(t *testing.T) {
+	truncate(t)
+	ctx := newGinContext()
+
+	const userID, tokenID, planID, subID = 101, 101, 2, 2
+	const preConsumed = 120
+	const initUserQuota = 1500
+	const tokenRemain = 10000
+	const subTotal int64 = 5000
+
+	seedUser(t, userID, initUserQuota)
+	seedToken(t, tokenID, userID, "sk-test-sub-unmatched", tokenRemain)
+	seedSubscriptionPlan(t, planID, "Group B Plan", `["group-b"]`, subTotal)
+	seedSubscription(t, subID, userID, subTotal, 0)
+	seedChannel(t, 2)
+	model.DB.Model(&model.UserSubscription{}).Where("id = ?", subID).Update("plan_id", planID)
+
+	session, apiErr := NewBillingSession(
+		ctx,
+		makeBillingRelayInfo(userID, "group-a", "subscription_first", "sub-unmatched-wallet-fallback", tokenID, "sk-test-sub-unmatched"),
+		preConsumed,
+	)
+	if apiErr != nil {
+		t.Fatalf("new billing session failed: code=%s msg=%s", apiErr.GetErrorCode(), apiErr.Error())
+	}
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceWallet, session.funding.Source())
+	assert.Equal(t, preConsumed, session.GetPreConsumedQuota())
+	assert.Equal(t, initUserQuota-preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, int64(0), getSubscriptionUsed(t, subID))
+}
+
+func TestNewBillingSession_SubscriptionFirst_SubscriptionsUseGroupIsolated(t *testing.T) {
+	truncate(t)
+	ctxA := newGinContext()
+	ctxB := newGinContext()
+
+	const userID, tokenID, planAID, planBID, subAID, subBID = 102, 102, 3, 4, 3, 4
+	const tokenRemain = 20000
+	const subAConsumed = 300
+	const subBConsumed = 500
+
+	seedUserWithGroup(t, userID, 0, "default")
+	seedToken(t, tokenID, userID, "sk-test-sub-multi", tokenRemain)
+	seedSubscriptionPlan(t, planAID, "Plan A", `["group-a"]`, 10000)
+	seedSubscriptionPlan(t, planBID, "Plan B", `["group-b"]`, 10000)
+	seedSubscription(t, subAID, userID, 10000, 0)
+	seedSubscription(t, subBID, userID, 10000, 0)
+	seedChannel(t, 3)
+	model.DB.Model(&model.UserSubscription{}).Where("id = ?", subAID).Update("plan_id", planAID)
+	model.DB.Model(&model.UserSubscription{}).Where("id = ?", subBID).Update("plan_id", planBID)
+
+	sessionA, apiErrA := NewBillingSession(
+		ctxA,
+		makeBillingRelayInfo(userID, "group-a", "subscription_first", "sub-group-a", tokenID, "sk-test-sub-multi"),
+		subAConsumed,
+	)
+	if apiErrA != nil {
+		t.Fatalf("new billing session A failed: code=%s msg=%s", apiErrA.GetErrorCode(), apiErrA.Error())
+	}
+	require.NotNil(t, sessionA)
+
+	sessionB, apiErrB := NewBillingSession(
+		ctxB,
+		makeBillingRelayInfo(userID, "group-b", "subscription_first", "sub-group-b", tokenID, "sk-test-sub-multi"),
+		subBConsumed,
+	)
+	if apiErrB != nil {
+		t.Fatalf("new billing session B failed: code=%s msg=%s", apiErrB.GetErrorCode(), apiErrB.Error())
+	}
+	require.NotNil(t, sessionB)
+
+	assert.Equal(t, BillingSourceSubscription, sessionA.funding.Source())
+	assert.Equal(t, BillingSourceSubscription, sessionB.funding.Source())
+	assert.Equal(t, int64(subAConsumed), getSubscriptionUsed(t, subAID))
+	assert.Equal(t, int64(subBConsumed), getSubscriptionUsed(t, subBID))
+	assert.Equal(t, int64(0), getSubscriptionUsed(t, subAID)-int64(subAConsumed))
+	assert.Equal(t, int64(0), getSubscriptionUsed(t, subBID)-int64(subBConsumed))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+}
 
 func TestRefundTaskQuota_Wallet(t *testing.T) {
 	truncate(t)

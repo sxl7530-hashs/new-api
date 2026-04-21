@@ -442,3 +442,40 @@ export const processUserData = (data, dataExportDefaultTime, limit = 10) => {
 
   return { rankingData, trendData, topUsers };
 };
+
+export const processUserDailyQuotaRanking = (data, limit = 10) => {
+  const userDailyQuotaTotal = new Map();
+
+  data.forEach((item) => {
+    const username = item.username;
+    if (!username) return;
+
+    const ts = Number(item.created_at);
+    if (!Number.isFinite(ts)) return;
+
+    const date = new Date(ts * 1000);
+    if (Number.isNaN(date.getTime())) return;
+
+    const year = date.getFullYear();
+    let month = (date.getMonth() + 1).toString();
+    let day = date.getDate().toString();
+    if (month.length === 1) month = `0${month}`;
+    if (day.length === 1) day = `0${day}`;
+    const dateKey = `${year}-${month}-${day}`;
+    const mapKey = `${dateKey}#${username}`;
+
+    const prev = userDailyQuotaTotal.get(mapKey) || {
+      Date: dateKey,
+      User: username,
+      Quota: 0,
+    };
+    userDailyQuotaTotal.set(mapKey, {
+      ...prev,
+      Quota: (prev.Quota || 0) + item.quota,
+    });
+  });
+
+  return Array.from(userDailyQuotaTotal.values())
+    .sort((a, b) => b.Quota - a.Quota)
+    .slice(0, limit);
+};

@@ -69,6 +69,25 @@ function submitEpayForm({ url, params }) {
   document.body.removeChild(form);
 }
 
+const parseSupportedGroupsDisplay = (rawGroups) => {
+  if (!rawGroups) return '';
+  if (Array.isArray(rawGroups)) {
+    return rawGroups.filter(Boolean).join(', ');
+  }
+  if (typeof rawGroups !== 'string') return '';
+  const trimmed = rawGroups.trim();
+  if (!trimmed || trimmed === '[]') return '';
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(Boolean).join(', ');
+    }
+  } catch (e) {
+    return trimmed;
+  }
+  return trimmed;
+};
+
 const SubscriptionPlansCard = ({
   t,
   loading = false,
@@ -234,6 +253,10 @@ const SubscriptionPlansCard = ({
 
   const getPlanPurchaseCount = (planId) =>
     planPurchaseCountMap.get(planId) || 0;
+
+  const getPlanSupportedGroups = (plan) => {
+    return parseSupportedGroupsDisplay(plan?.supported_groups);
+  };
 
   // 计算单个订阅的剩余天数
   const getRemainingDays = (sub) => {
@@ -506,6 +529,10 @@ const SubscriptionPlansCard = ({
                 const upgradeLabel = plan?.upgrade_group
                   ? `${t('升级分组')}: ${plan.upgrade_group}`
                   : null;
+                const supportedGroupsLabel =
+                  getPlanSupportedGroups(plan) !== ''
+                    ? `${t('支持分组')}: ${getPlanSupportedGroups(plan)}`
+                    : `${t('支持分组')}: ${t('全部分组')}`;
                 const resetLabel =
                   formatSubscriptionResetPeriod(plan, t) === t('不重置')
                     ? null
@@ -523,6 +550,7 @@ const SubscriptionPlansCard = ({
                     : { label: totalLabel },
                   limitLabel ? { label: limitLabel } : null,
                   upgradeLabel ? { label: upgradeLabel } : null,
+                  { label: supportedGroupsLabel },
                 ].filter(Boolean);
 
                 return (

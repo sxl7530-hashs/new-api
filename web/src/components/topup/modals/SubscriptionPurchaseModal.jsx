@@ -40,6 +40,25 @@ import {
 
 const { Text } = Typography;
 
+const parseSupportedGroupsDisplay = (rawGroups) => {
+  if (!rawGroups) return '';
+  if (Array.isArray(rawGroups)) {
+    return rawGroups.filter(Boolean).join(', ');
+  }
+  if (typeof rawGroups !== 'string') return '';
+  const trimmed = rawGroups.trim();
+  if (!trimmed || trimmed === '[]') return '';
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(Boolean).join(', ');
+    }
+  } catch (e) {
+    return trimmed;
+  }
+  return trimmed;
+};
+
 const SubscriptionPurchaseModal = ({
   t,
   visible,
@@ -74,6 +93,7 @@ const SubscriptionPurchaseModal = ({
   const purchaseCount = Number(purchaseLimitInfo?.count || 0);
   const purchaseLimitReached =
     purchaseLimit > 0 && purchaseCount >= purchaseLimit;
+  const supportedGroupsLabel = parseSupportedGroupsDisplay(plan?.supported_groups);
 
   return (
     <Modal
@@ -156,6 +176,14 @@ const SubscriptionPurchaseModal = ({
                   </Text>
                 </div>
               ) : null}
+              <div className='flex justify-between items-center'>
+                <Text strong className='text-slate-700 dark:text-slate-200'>
+                  {t('支持分组')}：
+                </Text>
+                <Text className='text-slate-900 dark:text-slate-100'>
+                  {supportedGroupsLabel || t('全部分组')}
+                </Text>
+              </div>
               <Divider margin={8} />
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>

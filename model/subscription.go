@@ -35,6 +35,7 @@ const (
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
+	ErrNoMatchingSubscriptionForGroup = errors.New("no active subscription for requested group")
 )
 
 const (
@@ -80,6 +81,60 @@ func subscriptionPlanInfoCacheCapacity() int {
 		capacity = 10000
 	}
 	return capacity
+}
+
+func normalizeSubscriptionGroupList(raw string) ([]string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []string{}, nil
+	}
+
+	var groups []string
+	if strings.HasPrefix(trimmed, "[") {
+		if err := common.UnmarshalJsonStr(trimmed, &groups); err != nil {
+			return nil, fmt.Errorf("supported_groups must be valid JSON array: %w", err)
+		}
+	} else {
+		for _, g := range strings.Split(trimmed, ",") {
+			g = strings.TrimSpace(g)
+			if g != "" {
+				groups = append(groups, g)
+			}
+		}
+		if len(groups) == 0 {
+			return nil, errors.New("supported_groups must be valid JSON array or comma-separated list")
+		}
+	}
+
+	normalized := make([]string, 0, len(groups))
+	seen := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if _, exists := seen[group]; exists {
+			continue
+		}
+		seen[group] = struct{}{}
+		normalized = append(normalized, group)
+	}
+	return normalized, nil
+}
+
+func NormalizeSubscriptionSupportedGroups(raw string) (string, error) {
+	groups, err := normalizeSubscriptionGroupList(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(groups) == 0 {
+		return "[]", nil
+	}
+	data, err := common.Marshal(groups)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func getSubscriptionPlanCache() *cachex.HybridCache[SubscriptionPlan] {
@@ -167,6 +222,8 @@ type SubscriptionPlan struct {
 
 	// Upgrade user group after purchase (empty = no change)
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
+	// Supported groups for this plan; empty array means all groups
+	SupportedGroups string `json:"supported_groups" gorm:"type:text;default:''"`
 
 	// Total quota (amount in quota units, 0 = unlimited)
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
@@ -189,6 +246,26 @@ func (p *SubscriptionPlan) BeforeCreate(tx *gorm.DB) error {
 func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 	p.UpdatedAt = common.GetTimestamp()
 	return nil
+}
+
+func (p *SubscriptionPlan) SupportsGroup(group string) (bool, error) {
+	if p == nil {
+		return false, errors.New("plan is nil")
+	}
+	groups, err := normalizeSubscriptionGroupList(p.SupportedGroups)
+	if err != nil {
+		return false, err
+	}
+	if len(groups) == 0 {
+		return true, nil
+	}
+	group = strings.TrimSpace(group)
+	for _, item := range groups {
+		if item == group {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Subscription order (payment -> webhook -> create UserSubscription)
@@ -952,8 +1029,8 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 	return tx.Save(sub).Error
 }
 
-// PreConsumeUserSubscription pre-consumes from any active subscription total quota.
-func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
+// PreConsumeUserSubscription pre-consumes from active subscriptions that support the requested group.
+func PreConsumeUserSubscription(requestId string, userId int, usingGroup string, amount int64) (*SubscriptionPreConsumeResult, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
 	}
@@ -964,6 +1041,14 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		return nil, errors.New("amount must be > 0")
 	}
 	now := GetDBTimestamp()
+	usingGroup = strings.TrimSpace(usingGroup)
+	if usingGroup == "" {
+		group, err := getUserGroupByIdTx(DB, userId)
+		if err != nil {
+			return nil, err
+		}
+		usingGroup = group
+	}
 
 	returnValue := &SubscriptionPreConsumeResult{}
 
@@ -999,12 +1084,21 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		if len(subs) == 0 {
 			return errors.New("no active subscription")
 		}
+		foundSupportedGroup := false
 		for _, candidate := range subs {
 			sub := candidate
 			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
 			if err != nil {
 				return err
 			}
+			supported, err := plan.SupportsGroup(usingGroup)
+			if err != nil {
+				return err
+			}
+			if !supported {
+				continue
+			}
+			foundSupportedGroup = true
 			if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
 				return err
 			}
@@ -1047,6 +1141,9 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			returnValue.AmountUsedBefore = usedBefore
 			returnValue.AmountUsedAfter = sub.AmountUsed
 			return nil
+		}
+		if !foundSupportedGroup {
+			return fmt.Errorf("%w: %s", ErrNoMatchingSubscriptionForGroup, usingGroup)
 		}
 		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
 	})

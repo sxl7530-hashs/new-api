@@ -64,6 +64,25 @@ const resetPeriodOptions = [
   { value: 'custom', label: '自定义(秒)' },
 ];
 
+const parseSupportedGroupsText = (rawGroups) => {
+  if (!rawGroups) return '';
+  if (Array.isArray(rawGroups)) {
+    return rawGroups.filter(Boolean).join(',');
+  }
+  if (typeof rawGroups !== 'string') return '';
+  const trimmed = rawGroups.trim();
+  if (!trimmed || trimmed === '[]') return '';
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(Boolean).join(',');
+    }
+  } catch (e) {
+    // keep raw value if not valid JSON
+  }
+  return trimmed;
+};
+
 const AddEditSubscriptionModal = ({
   visible,
   handleClose,
@@ -95,6 +114,7 @@ const AddEditSubscriptionModal = ({
     max_purchase_per_user: 0,
     total_amount: 0,
     upgrade_group: '',
+    supported_groups: '',
     stripe_price_id: '',
     creem_product_id: '',
   });
@@ -121,6 +141,7 @@ const AddEditSubscriptionModal = ({
         quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
       ),
       upgrade_group: p.upgrade_group || '',
+      supported_groups: parseSupportedGroupsText(p.supported_groups || ''),
       stripe_price_id: p.stripe_price_id || '',
       creem_product_id: p.creem_product_id || '',
     };
@@ -164,6 +185,7 @@ const AddEditSubscriptionModal = ({
           max_purchase_per_user: Number(values.max_purchase_per_user || 0),
           total_amount: displayAmountToQuota(values.total_amount),
           upgrade_group: values.upgrade_group || '',
+          supported_groups: (values.supported_groups || '').trim(),
         },
       };
       if (editingPlan?.plan?.id) {
@@ -340,6 +362,18 @@ const AddEditSubscriptionModal = ({
                           </Select.Option>
                         ))}
                       </Form.Select>
+                    </Col>
+
+                    <Col span={12}>
+                      <Form.Input
+                        field='supported_groups'
+                        label={t('支持分组')}
+                        placeholder={t('空表示全部分组；多个请用英文逗号分隔')}
+                        showClear
+                        extraText={t(
+                          '仅这些分组可使用该套餐，后台会自动去重并校验分组是否存在',
+                        )}
+                      />
                     </Col>
 
                     <Col span={12}>

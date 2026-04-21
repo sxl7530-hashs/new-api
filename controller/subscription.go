@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -156,7 +157,13 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
 		return
 	}
-	err := model.DB.Create(&req.Plan).Error
+	supportedGroups, err := normalizeAndValidateSupportedGroups(req.Plan.SupportedGroups)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	req.Plan.SupportedGroups = supportedGroups
+	err = model.DB.Create(&req.Plan).Error
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -219,8 +226,14 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
 		return
 	}
+	supportedGroups, err := normalizeAndValidateSupportedGroups(req.Plan.SupportedGroups)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	req.Plan.SupportedGroups = supportedGroups
 
-	err := model.DB.Transaction(func(tx *gorm.DB) error {
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		// update plan (allow zero values updates with map)
 		updateMap := map[string]interface{}{
 			"title":                      req.Plan.Title,
@@ -237,6 +250,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"max_purchase_per_user":      req.Plan.MaxPurchasePerUser,
 			"total_amount":               req.Plan.TotalAmount,
 			"upgrade_group":              req.Plan.UpgradeGroup,
+			"supported_groups":           req.Plan.SupportedGroups,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
 			"updated_at":                 common.GetTimestamp(),
@@ -252,6 +266,27 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	}
 	model.InvalidateSubscriptionPlanCache(id)
 	common.ApiSuccess(c, nil)
+}
+
+func normalizeAndValidateSupportedGroups(raw string) (string, error) {
+	normalized, err := model.NormalizeSubscriptionSupportedGroups(raw)
+	if err != nil {
+		return "", err
+	}
+	if normalized == "" || normalized == "[]" {
+		return "[]", nil
+	}
+	var groups []string
+	if err := common.UnmarshalJsonStr(normalized, &groups); err != nil {
+		return "", err
+	}
+	groupRatios := ratio_setting.GetGroupRatioCopy()
+	for _, group := range groups {
+		if _, ok := groupRatios[group]; !ok {
+			return "", fmt.Errorf("支持分组不存在: %s", group)
+		}
+	}
+	return normalized, nil
 }
 
 type AdminUpdateSubscriptionPlanStatusRequest struct {

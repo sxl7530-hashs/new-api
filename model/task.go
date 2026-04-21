@@ -303,15 +303,24 @@ func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 	return tasks
 }
 
-func GetAllUnFinishSyncTasks(limit int) []*Task {
+func GetAllUnFinishSyncTasksAfterID(lastTaskID int64, limit int) []*Task {
+	query := DB.Where("progress != ?", "100%").
+		Where("status != ?", TaskStatusFailure).
+		Where("status != ?", TaskStatusSuccess)
+
+	if lastTaskID > 0 {
+		query = query.Where("id > ?", lastTaskID)
+	}
 	var tasks []*Task
-	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
+	err := query.Order("id").Limit(limit).Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
 	return tasks
+}
+
+func GetAllUnFinishSyncTasks(limit int) []*Task {
+	return GetAllUnFinishSyncTasksAfterID(0, limit)
 }
 
 func GetByOnlyTaskId(taskId string) (*Task, bool, error) {

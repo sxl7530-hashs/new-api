@@ -48,6 +48,11 @@ import {
   mergeAdminConfig,
   useSidebar,
 } from '../../../../hooks/common/useSidebar';
+import {
+  SIDEBAR_SECTION_CONFIGS,
+  getDefaultSidebarModulesAdmin,
+  sanitizeSidebarModulesConfig,
+} from '../../../../helpers/sidebarModules';
 
 const NotificationSettings = ({
   t,
@@ -63,36 +68,9 @@ const NotificationSettings = ({
   // 左侧边栏设置相关状态
   const [sidebarLoading, setSidebarLoading] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState('notification');
-  const [sidebarModulesUser, setSidebarModulesUser] = useState({
-    chat: {
-      enabled: true,
-      playground: true,
-      chat: true,
-    },
-    console: {
-      enabled: true,
-      detail: true,
-      token: true,
-      log: true,
-      midjourney: true,
-      task: true,
-    },
-    personal: {
-      enabled: true,
-      topup: true,
-      personal: true,
-    },
-    admin: {
-      enabled: true,
-      channel: true,
-      models: true,
-      deployment: true,
-      subscription: true,
-      redemption: true,
-      user: true,
-      setting: true,
-    },
-  });
+  const [sidebarModulesUser, setSidebarModulesUser] = useState(
+    getDefaultSidebarModulesAdmin(),
+  );
   const [adminConfig, setAdminConfig] = useState(null);
 
   // 使用后端权限验证替代前端角色判断
@@ -135,10 +113,11 @@ const NotificationSettings = ({
   };
 
   const saveSidebarSettings = async () => {
+    const payload = sanitizeSidebarModulesConfig(sidebarModulesUser);
     setSidebarLoading(true);
     try {
       const res = await API.put('/api/user/self', {
-        sidebar_modules: JSON.stringify(sidebarModulesUser),
+        sidebar_modules: JSON.stringify(payload),
       });
       if (res.data.success) {
         showSuccess(t('侧边栏设置保存成功'));
@@ -155,29 +134,7 @@ const NotificationSettings = ({
   };
 
   const resetSidebarModules = () => {
-    const defaultConfig = {
-      chat: { enabled: true, playground: true, chat: true },
-      console: {
-        enabled: true,
-        detail: true,
-        token: true,
-        log: true,
-        midjourney: true,
-        task: true,
-      },
-      personal: { enabled: true, topup: true, personal: true },
-      admin: {
-        enabled: true,
-        channel: true,
-        models: true,
-        deployment: true,
-        subscription: true,
-        redemption: true,
-        user: true,
-        setting: true,
-      },
-    };
-    setSidebarModulesUser(defaultConfig);
+    setSidebarModulesUser(getDefaultSidebarModulesAdmin());
   };
 
   // 加载左侧边栏配置
@@ -207,7 +164,7 @@ const NotificationSettings = ({
           } else {
             userConf = userRes.data.data.sidebar_modules;
           }
-          setSidebarModulesUser(userConf);
+          setSidebarModulesUser(sanitizeSidebarModulesConfig(userConf));
         }
       } catch (error) {
         console.error('加载边栏配置失败:', error);
@@ -243,81 +200,16 @@ const NotificationSettings = ({
   };
 
   // 区域配置数据（根据权限过滤）
-  const sectionConfigs = [
-    {
-      key: 'chat',
-      title: t('聊天区域'),
-      description: t('操练场和聊天功能'),
-      modules: [
-        {
-          key: 'playground',
-          title: t('操练场'),
-          description: t('AI模型测试环境'),
-        },
-        { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
-      ],
-    },
-    {
-      key: 'console',
-      title: t('控制台区域'),
-      description: t('数据管理和日志查看'),
-      modules: [
-        { key: 'detail', title: t('数据看板'), description: t('系统数据统计') },
-        { key: 'token', title: t('令牌管理'), description: t('API令牌管理') },
-        { key: 'log', title: t('使用日志'), description: t('API使用记录') },
-        {
-          key: 'midjourney',
-          title: t('绘图日志'),
-          description: t('绘图任务记录'),
-        },
-        { key: 'task', title: t('任务日志'), description: t('系统任务记录') },
-      ],
-    },
-    {
-      key: 'personal',
-      title: t('个人中心区域'),
-      description: t('用户个人功能'),
-      modules: [
-        { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
-        {
-          key: 'personal',
-          title: t('个人设置'),
-          description: t('个人信息设置'),
-        },
-      ],
-    },
-    // 管理员区域：根据后端权限控制显示
-    {
-      key: 'admin',
-      title: t('管理员区域'),
-      description: t('系统管理功能'),
-      modules: [
-        { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
-        { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
-        {
-          key: 'deployment',
-          title: t('模型部署'),
-          description: t('模型部署管理'),
-        },
-        {
-          key: 'subscription',
-          title: t('订阅管理'),
-          description: t('订阅套餐管理'),
-        },
-        {
-          key: 'redemption',
-          title: t('兑换码管理'),
-          description: t('兑换码生成管理'),
-        },
-        { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
-        {
-          key: 'setting',
-          title: t('系统设置'),
-          description: t('系统参数配置'),
-        },
-      ],
-    },
-  ]
+  const sectionConfigs = SIDEBAR_SECTION_CONFIGS.map((section) => ({
+    ...section,
+    title: t(section.title),
+    description: t(section.description),
+    modules: section.modules.map((module) => ({
+      ...module,
+      title: t(module.title),
+      description: t(module.description),
+    })),
+  }))
     .filter((section) => {
       // 使用后端权限验证替代前端角色判断
       return isSidebarSectionAllowed(section.key);

@@ -35,6 +35,7 @@ import {
   updateMapValue,
   initializeMaps,
   processUserData,
+  processUserDailyQuotaRanking,
 } from '../../helpers/dashboard';
 
 const USER_COLORS = [
@@ -328,6 +329,53 @@ export const useDashboardCharts = (
     color: { type: 'ordinal', range: USER_COLORS },
   });
 
+  // ========== Admin: 用户日消费金额排行 ==========
+  const [spec_user_daily_rank, setSpecUserDailyRank] = useState({
+    type: 'bar',
+    data: [{ id: 'userDailyRankData', values: [] }],
+    xField: 'rawQuota',
+    yField: 'DateUser',
+    seriesField: 'DateUser',
+    direction: 'horizontal',
+    legends: { visible: false },
+    title: {
+      visible: true,
+      text: t('用户日消费金额排行'),
+      subtext: '',
+    },
+    bar: {
+      state: { hover: { stroke: '#000', lineWidth: 1 } },
+    },
+    label: {
+      visible: true,
+      position: 'outside',
+      formatMethod: (value, datum) => renderQuota(datum['rawQuota'] || 0, 2),
+    },
+    axes: [
+      {
+        orient: 'left',
+        type: 'band',
+        label: { visible: true },
+      },
+      {
+        orient: 'bottom',
+        type: 'linear',
+        visible: false,
+      },
+    ],
+    tooltip: {
+      mark: {
+        content: [
+          {
+            key: (datum) => `${datum['Date']} | ${datum['User']}`,
+            value: (datum) => renderQuota(datum['rawQuota'] || 0, 4),
+          },
+        ],
+      },
+    },
+    color: { type: 'ordinal', range: USER_COLORS },
+  });
+
   // ========== Admin: 用户消耗趋势 ==========
   const [spec_user_trend, setSpecUserTrend] = useState({
     type: 'area',
@@ -570,6 +618,7 @@ export const useDashboardCharts = (
         dataExportDefaultTime,
         10,
       );
+      const dailyRankingData = processUserDailyQuotaRanking(data, 10);
 
       const userRankValues = rankingData.map((item) => ({
         User: item.User,
@@ -585,6 +634,28 @@ export const useDashboardCharts = (
         title: {
           ...prev.title,
           subtext: `${t('总计')}：${renderQuota(totalUserQuota, 2)}`,
+        },
+      }));
+
+      const userDailyRankValues = dailyRankingData.map((item) => ({
+        DateUser: `${item.Date} ${item.User}`,
+        Date: item.Date,
+        User: item.User,
+        rawQuota: item.Quota,
+        Quota: getQuotaWithUnit(item.Quota, 4),
+      }));
+
+      const totalDailyQuota = userDailyRankValues.reduce(
+        (sum, item) => sum + item.rawQuota,
+        0,
+      );
+
+      setSpecUserDailyRank((prev) => ({
+        ...prev,
+        data: [{ id: 'userDailyRankData', values: userDailyRankValues }],
+        title: {
+          ...prev.title,
+          subtext: `${t('总计')}：${renderQuota(totalDailyQuota, 2)}`,
         },
       }));
 
@@ -621,6 +692,7 @@ export const useDashboardCharts = (
     spec_rank_bar,
     spec_user_rank,
     spec_user_trend,
+    spec_user_daily_rank,
     updateChartData,
     updateUserChartData,
     generateModelColors,

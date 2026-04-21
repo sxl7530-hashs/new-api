@@ -142,8 +142,9 @@ func main() {
 		gopool.Go(func() {
 			log.Println(http.ListenAndServe("0.0.0.0:8005", nil))
 		})
-		go common.Monitor()
-		common.SysLog("pprof enabled")
+		if common.GetEnvOrDefaultBool("PPROF_MONITOR_ENABLED", false) {
+			go common.Monitor()
+		}
 	}
 
 	err = common.StartPyroScope()
@@ -278,6 +279,12 @@ func InitResources() error {
 
 	// 初始化模型
 	model.GetPricing()
+
+	if !common.GetEnvOrDefaultBool("PERFORMANCE_MONITOR_ENABLED", true) {
+		monitorConfig := common.GetPerformanceMonitorConfig()
+		monitorConfig.Enabled = false
+		common.SetPerformanceMonitorConfig(monitorConfig)
+	}
 
 	// Initialize SQL Database
 	err = model.InitLogDB()

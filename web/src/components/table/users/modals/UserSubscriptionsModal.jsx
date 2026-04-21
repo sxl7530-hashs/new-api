@@ -40,6 +40,25 @@ import CardTable from '../../../common/ui/CardTable';
 
 const { Text } = Typography;
 
+const parseSupportedGroupsDisplay = (rawGroups) => {
+  if (!rawGroups) return '';
+  if (Array.isArray(rawGroups)) {
+    return rawGroups.filter(Boolean).join(', ');
+  }
+  if (typeof rawGroups !== 'string') return '';
+  const trimmed = rawGroups.trim();
+  if (!trimmed || trimmed === '[]') return '';
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(Boolean).join(', ');
+    }
+  } catch (e) {
+    return trimmed;
+  }
+  return trimmed;
+};
+
 function formatTs(ts) {
   if (!ts) return '-';
   return new Date(ts * 1000).toLocaleString();
@@ -86,15 +105,18 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
-  const planTitleMap = useMemo(() => {
+  const planInfoMap = useMemo(() => {
     const map = new Map();
     (plans || []).forEach((p) => {
       const id = p?.plan?.id;
-      const title = p?.plan?.title;
-      if (id) map.set(id, title || `#${id}`);
+      if (!id) return;
+      map.set(id, {
+        title: p?.plan?.title || `#${id}`,
+        supportedGroups: parseSupportedGroupsDisplay(p?.plan?.supported_groups),
+      });
     });
     return map;
-  }, [plans]);
+  }, [plans, t]);
 
   const pagedSubs = useMemo(() => {
     const start = Math.max(0, (Number(currentPage || 1) - 1) * pageSize);
@@ -107,7 +129,7 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
       label: `${p?.plan?.title || ''} (${convertUSDToCurrency(
         Number(p?.plan?.price_amount || 0),
         2,
-      )})`,
+      )}) ${t('支持分组')}: ${parseSupportedGroupsDisplay(p?.plan?.supported_groups) || t('全部')}`,
       value: p?.plan?.id,
     }));
   }, [plans]);
@@ -260,11 +282,16 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
         render: (_, record) => {
           const sub = record?.subscription;
           const planId = sub?.plan_id;
-          const title =
-            planTitleMap.get(planId) || (planId ? `#${planId}` : '-');
+          const planMeta = planInfoMap.get(planId);
+          const title = planMeta?.title || (planId ? `#${planId}` : '-');
           return (
             <div className='min-w-0'>
               <div className='font-medium truncate'>{title}</div>
+              {planMeta?.supportedGroups ? (
+                <div className='text-xs text-gray-500'>
+                  {t('支持分组')}: {planMeta.supportedGroups}
+                </div>
+              ) : null}
               <div className='text-xs text-gray-500'>
                 {t('来源')}: {sub?.source || '-'}
               </div>

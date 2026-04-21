@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -94,7 +93,7 @@ func InitEnv() {
 	}
 
 	// Parse requestInterval and set RequestInterval
-	requestInterval, _ = strconv.Atoi(os.Getenv("POLLING_INTERVAL"))
+	requestInterval = GetEnvOrDefault("POLLING_INTERVAL", 0)
 	RequestInterval = time.Duration(requestInterval) * time.Second
 
 	// Initialize variables with GetEnvOrDefault
@@ -103,6 +102,30 @@ func InitEnv() {
 	RelayTimeout = GetEnvOrDefault("RELAY_TIMEOUT", 0)
 	RelayMaxIdleConns = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS", 500)
 	RelayMaxIdleConnsPerHost = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS_PER_HOST", 100)
+	TaskPollingInterval = GetEnvOrDefault("TASK_POLLING_INTERVAL_SECONDS", 15)
+	if TaskPollingInterval < 5 {
+		TaskPollingInterval = 5
+	}
+	TaskPollingPlatformConcurrency = GetEnvOrDefault("TASK_POLLING_PLATFORM_CONCURRENCY", 1)
+	if TaskPollingPlatformConcurrency < 1 {
+		TaskPollingPlatformConcurrency = 1
+	}
+	TaskPollingChannelConcurrency = GetEnvOrDefault("TASK_POLLING_CHANNEL_CONCURRENCY", 2)
+	if TaskPollingChannelConcurrency < 1 {
+		TaskPollingChannelConcurrency = 1
+	}
+	constant.TaskQueryLimit = GetEnvOrDefault("TASK_QUERY_LIMIT", 1000)
+	if constant.TaskQueryLimit < 1 {
+		constant.TaskQueryLimit = 1
+	}
+	DataExportInterval = GetEnvOrDefault("DATA_EXPORT_INTERVAL", 5)
+	if DataExportInterval < 1 {
+		DataExportInterval = 1
+	}
+	SubscriptionResetTickIntervalMinutes = GetEnvOrDefault("SUBSCRIPTION_RESET_TICK_MINUTES", 1)
+	if SubscriptionResetTickIntervalMinutes < 1 {
+		SubscriptionResetTickIntervalMinutes = 1
+	}
 
 	// Initialize string variables with GetEnvOrDefaultString
 	GeminiSafetySetting = GetEnvOrDefaultString("GEMINI_SAFETY_SETTING", "BLOCK_NONE")
@@ -147,8 +170,6 @@ func initConstantEnv() {
 	constant.GenerateDefaultToken = GetEnvOrDefaultBool("GENERATE_DEFAULT_TOKEN", false)
 	// 是否启用错误日志
 	constant.ErrorLogEnabled = GetEnvOrDefaultBool("ERROR_LOG_ENABLED", false)
-	// 任务轮询时查询的最大数量
-	constant.TaskQueryLimit = GetEnvOrDefault("TASK_QUERY_LIMIT", 1000)
 	// 异步任务超时时间（分钟），超过此时间未完成的任务将被标记为失败并退款。0 表示禁用。
 	constant.TaskTimeoutMinutes = GetEnvOrDefault("TASK_TIMEOUT_MINUTES", 1440)
 

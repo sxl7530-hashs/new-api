@@ -64,6 +64,25 @@ function formatResetPeriod(plan, t) {
   return t('不重置');
 }
 
+const parseSupportedGroupsDisplay = (raw) => {
+  if (!raw) return '';
+  if (Array.isArray(raw)) {
+    return raw.filter(Boolean).join(', ');
+  }
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === '[]') return '';
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(Boolean).join(', ');
+    }
+  } catch (e) {
+    return trimmed;
+  }
+  return trimmed;
+};
+
 const renderPlanTitle = (text, record, t) => {
   const subtitle = record?.plan?.subtitle;
   const plan = record?.plan;
@@ -101,6 +120,10 @@ const renderPlanTitle = (text, record, t) => {
         <Text>{formatDuration(plan, t)}</Text>
         <Text type='tertiary'>{t('重置')}</Text>
         <Text>{formatResetPeriod(plan, t)}</Text>
+        <Text type='tertiary'>{t('支持分组')}</Text>
+        <Text>
+          {parseSupportedGroupsDisplay(plan?.supported_groups) || t('全部分组')}
+        </Text>
       </div>
     </div>
   );
@@ -188,6 +211,15 @@ const renderUpgradeGroup = (text, record, t) => {
   return (
     <Text type={group ? 'secondary' : 'tertiary'}>
       {group ? group : t('不升级')}
+    </Text>
+  );
+};
+
+const renderSupportedGroups = (text, record, t) => {
+  const groups = parseSupportedGroupsDisplay(record?.plan?.supported_groups);
+  return (
+    <Text type={groups ? 'secondary' : 'tertiary'}>
+      {groups || t('全部分组')}
     </Text>
   );
 };
@@ -344,6 +376,11 @@ export const getSubscriptionsColumns = ({
       title: t('升级分组'),
       width: 100,
       render: (text, record) => renderUpgradeGroup(text, record, t),
+    },
+    {
+      title: t('支持分组'),
+      width: 160,
+      render: (text, record) => renderSupportedGroups(text, record, t),
     },
     {
       title: t('操作'),

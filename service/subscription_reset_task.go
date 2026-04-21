@@ -15,9 +15,8 @@ import (
 )
 
 const (
-	subscriptionResetTickInterval = 1 * time.Minute
-	subscriptionResetBatchSize    = 300
-	subscriptionCleanupInterval   = 30 * time.Minute
+	subscriptionResetBatchSize  = 300
+	subscriptionCleanupInterval = 30 * time.Minute
 )
 
 var (
@@ -32,8 +31,9 @@ func StartSubscriptionQuotaResetTask() {
 			return
 		}
 		gopool.Go(func() {
-			logger.LogInfo(context.Background(), fmt.Sprintf("subscription quota reset task started: tick=%s", subscriptionResetTickInterval))
-			ticker := time.NewTicker(subscriptionResetTickInterval)
+			tickInterval := time.Duration(common.SubscriptionResetTickIntervalMinutes) * time.Minute
+			logger.LogInfo(context.Background(), fmt.Sprintf("subscription quota reset task started: tick=%s", tickInterval))
+			ticker := time.NewTicker(tickInterval)
 			defer ticker.Stop()
 
 			runSubscriptionQuotaResetOnce()

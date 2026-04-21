@@ -99,15 +99,6 @@ const renderType = (type, record = {}, t) => {
     return typeTag;
   }
 
-  const handleNavigate = (event) => {
-    event?.stopPropagation?.();
-    if (!ionetMeta?.deployment_id) {
-      return;
-    }
-    const targetUrl = `/console/deployment?deployment_id=${ionetMeta.deployment_id}`;
-    window.open(targetUrl, '_blank', 'noopener');
-  };
-
   return (
     <Space spacing={6}>
       {typeTag}
@@ -129,8 +120,7 @@ const renderType = (type, record = {}, t) => {
           <Tag
             color='purple'
             type='light'
-            className='cursor-pointer'
-            onClick={handleNavigate}
+            className='cursor-default'
           >
             IO.NET
           </Tag>

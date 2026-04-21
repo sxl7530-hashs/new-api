@@ -29,10 +29,7 @@ import {
   Cog,
   MoreHorizontal,
   LayoutDashboard,
-  MessageSquare,
-  Palette,
   CreditCard,
-  Server,
   Activity,
 } from 'lucide-react';
 
@@ -44,10 +41,8 @@ import RateLimitSetting from '../../components/settings/RateLimitSetting';
 import ModelSetting from '../../components/settings/ModelSetting';
 import DashboardSetting from '../../components/settings/DashboardSetting';
 import RatioSetting from '../../components/settings/RatioSetting';
-import ChatsSetting from '../../components/settings/ChatsSetting';
 import DrawingSetting from '../../components/settings/DrawingSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
-import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
 
 const Setting = () => {
@@ -77,16 +72,6 @@ const Setting = () => {
       ),
       content: <DashboardSetting />,
       itemKey: 'dashboard',
-    });
-    panes.push({
-      tab: (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <MessageSquare size={18} />
-          {t('聊天设置')}
-        </span>
-      ),
-      content: <ChatsSetting />,
-      itemKey: 'chats',
     });
     panes.push({
       tab: (
@@ -137,16 +122,6 @@ const Setting = () => {
       ),
       content: <ModelSetting />,
       itemKey: 'models',
-    });
-    panes.push({
-      tab: (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <Server size={18} />
-          {t('模型部署设置')}
-        </span>
-      ),
-      content: <ModelDeploymentSetting />,
-      itemKey: 'model-deployment',
     });
     panes.push({
       tab: (

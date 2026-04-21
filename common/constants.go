@@ -120,6 +120,10 @@ var requestInterval int
 var RequestInterval time.Duration
 
 var SyncFrequency int // unit is second
+var TaskPollingInterval = 15 // unit is second
+var TaskPollingPlatformConcurrency = 1 // concurrent task polling workers for different platforms
+var TaskPollingChannelConcurrency = 2 // concurrent channel workers per platform
+var SubscriptionResetTickIntervalMinutes = 1 // unit is minute
 
 var BatchUpdateEnabled = false
 var BatchUpdateInterval int

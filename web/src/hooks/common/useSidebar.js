@@ -20,59 +20,21 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { StatusContext } from '../../context/Status';
 import { API } from '../../helpers';
+import {
+  getDefaultSidebarModulesAdmin,
+  sanitizeSidebarModulesConfig,
+} from '../../helpers/sidebarModules';
 
 // 创建一个全局事件系统来同步所有useSidebar实例
 const sidebarEventTarget = new EventTarget();
 const SIDEBAR_REFRESH_EVENT = 'sidebar-refresh';
 
-export const DEFAULT_ADMIN_CONFIG = {
-  chat: {
-    enabled: true,
-    playground: true,
-    chat: true,
-  },
-  console: {
-    enabled: true,
-    detail: true,
-    token: true,
-    log: true,
-    midjourney: true,
-    task: true,
-  },
-  personal: {
-    enabled: true,
-    topup: true,
-    personal: true,
-  },
-  admin: {
-    enabled: true,
-    channel: true,
-    models: true,
-    deployment: true,
-    redemption: true,
-    user: true,
-    subscription: true,
-    setting: true,
-  },
-};
+export const DEFAULT_ADMIN_CONFIG = getDefaultSidebarModulesAdmin();
 
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
 export const mergeAdminConfig = (savedConfig) => {
-  const merged = deepClone(DEFAULT_ADMIN_CONFIG);
-  if (!savedConfig || typeof savedConfig !== 'object') return merged;
-
-  for (const [sectionKey, sectionConfig] of Object.entries(savedConfig)) {
-    if (!sectionConfig || typeof sectionConfig !== 'object') continue;
-
-    if (!merged[sectionKey]) {
-      merged[sectionKey] = { ...sectionConfig };
-      continue;
-    }
-
-    merged[sectionKey] = { ...merged[sectionKey], ...sectionConfig };
-  }
-
+  const merged = deepClone(sanitizeSidebarModulesConfig(savedConfig));
   return merged;
 };
 
@@ -122,7 +84,7 @@ export const useSidebar = () => {
         } else {
           config = res.data.data.sidebar_modules;
         }
-        setUserConfig(config);
+        setUserConfig(sanitizeSidebarModulesConfig(config));
       } else {
         // 当用户没有配置时，生成一个基于管理员配置的默认用户配置
         // 这样可以确保权限控制正确生效
