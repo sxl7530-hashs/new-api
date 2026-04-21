@@ -240,7 +240,7 @@ const renderOperations = (
     },
     {
       node: 'item',
-      name: t('注销'),
+      name: t('清除数据'),
       type: 'danger',
       onClick: () => showDeleteModal(record),
     },

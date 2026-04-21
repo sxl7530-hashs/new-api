@@ -44,13 +44,13 @@ const DeleteUserModal = ({
 
   return (
     <Modal
-      title={t('确定是否要注销此用户？')}
+      title={t('确定要一键清除此用户数据吗？')}
       visible={visible}
       onCancel={onCancel}
       onOk={handleConfirm}
       type='danger'
     >
-      {t('相当于删除用户，此修改将不可逆')}
+      {t('将删除用户及其令牌、日志、订阅、任务、充值、认证绑定等数据，此操作不可恢复')}
     </Modal>
   );
 };

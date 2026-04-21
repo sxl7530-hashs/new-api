@@ -328,6 +328,78 @@ func HardDeleteUserById(id int) error {
 	return err
 }
 
+func PurgeUserById(id int) error {
+	if id == 0 {
+		return errors.New("id 为空！")
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&User{}).Where("inviter_id = ?", id).Update("inviter_id", 0).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&Token{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&TopUp{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&Task{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&Midjourney{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&SubscriptionOrder{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&UserSubscription{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&SubscriptionPreConsumeRecord{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? OR used_user_id = ?", id, id).Delete(&Redemption{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("quota_data").Where("user_id = ?", id).Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("checkins").Where("user_id = ?", id).Delete(nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&UserOAuthBinding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("user_id = ?", id).Delete(&PasskeyCredential{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("user_id = ?", id).Delete(&TwoFABackupCode{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("user_id = ?", id).Delete(&TwoFA{}).Error; err != nil {
+			return err
+		}
+		if LOG_DB == DB {
+			if err := tx.Where("user_id = ?", id).Delete(&Log{}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Unscoped().Delete(&User{}, "id = ?", id).Error
+	})
+	if err != nil {
+		return err
+	}
+
+	if LOG_DB != nil && LOG_DB != DB {
+		if err := LOG_DB.Where("user_id = ?", id).Delete(&Log{}).Error; err != nil {
+			return err
+		}
+	}
+
+	_ = InvalidateUserCache(id)
+	return nil
+}
+
 func inviteUser(inviterId int) (err error) {
 	user, err := GetUserById(inviterId, true)
 	if err != nil {
