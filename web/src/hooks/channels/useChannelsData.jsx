@@ -127,6 +127,42 @@ export const useChannelsData = () => {
     searchKeyword: '',
     searchGroup: '',
     searchModel: '',
+    searchScoreRange: '',
+    searchScoreMin: '',
+    searchScoreMax: '',
+  };
+
+  const buildScoreQuery = ({ searchScoreRange, searchScoreMin, searchScoreMax }) => {
+    const minFromInput = parseFloat(searchScoreMin);
+    const maxFromInput = parseFloat(searchScoreMax);
+    if (Number.isFinite(minFromInput) || Number.isFinite(maxFromInput)) {
+      return {
+        minScore: Number.isFinite(minFromInput) ? minFromInput : undefined,
+        maxScore: Number.isFinite(maxFromInput) ? maxFromInput : undefined,
+      };
+    }
+    const normalized = (searchScoreRange || '').trim();
+    if (normalized === '') {
+      return {};
+    }
+    if (normalized === 'under_60') {
+      return {
+        minScore: 0,
+        maxScore: 59.9999,
+      };
+    }
+    if (normalized === '60_79_9') {
+      return {
+        minScore: 60,
+        maxScore: 79.9999,
+      };
+    }
+    if (normalized === '80_plus') {
+      return {
+        minScore: 80,
+      };
+    }
+    return {};
   };
 
   // Column keys
@@ -135,6 +171,7 @@ export const useChannelsData = () => {
     NAME: 'name',
     GROUP: 'group',
     TYPE: 'type',
+    SCORE: 'score',
     STATUS: 'status',
     RESPONSE_TIME: 'response_time',
     BALANCE: 'balance',
@@ -175,6 +212,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.NAME]: true,
       [COLUMN_KEYS.GROUP]: true,
       [COLUMN_KEYS.TYPE]: true,
+      [COLUMN_KEYS.SCORE]: true,
       [COLUMN_KEYS.STATUS]: true,
       [COLUMN_KEYS.RESPONSE_TIME]: true,
       [COLUMN_KEYS.BALANCE]: true,
@@ -258,6 +296,7 @@ export const useChannelsData = () => {
             group: '',
             used_quota: 0,
             response_time: 0,
+            score: '',
             priority: -1,
             weight: -1,
           };
@@ -313,7 +352,28 @@ export const useChannelsData = () => {
       searchKeyword: formValues.searchKeyword || '',
       searchGroup: formValues.searchGroup || '',
       searchModel: formValues.searchModel || '',
+      searchScoreRange: formValues.searchScoreRange || '',
+      searchScoreMin: formValues.searchScoreMin || '',
+      searchScoreMax: formValues.searchScoreMax || '',
     };
+  };
+
+  const hasActiveSearchFilter = ({
+    searchKeyword,
+    searchGroup,
+    searchModel,
+    searchScoreRange,
+    searchScoreMin,
+    searchScoreMax,
+  }) => {
+    return (
+      searchKeyword !== '' ||
+      searchGroup !== '' ||
+      searchModel !== '' ||
+      searchScoreRange !== '' ||
+      searchScoreMin !== '' ||
+      searchScoreMax !== ''
+    );
   };
 
   // Load channels
@@ -327,8 +387,18 @@ export const useChannelsData = () => {
   ) => {
     if (statusF === undefined) statusF = statusFilter;
 
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
-    if (searchKeyword !== '' || searchGroup !== '' || searchModel !== '') {
+    const { searchKeyword, searchGroup, searchModel, searchScoreRange, searchScoreMin, searchScoreMax } =
+      getFormValues();
+    if (
+      hasActiveSearchFilter({
+        searchKeyword,
+        searchGroup,
+        searchModel,
+        searchScoreRange,
+        searchScoreMin,
+        searchScoreMax,
+      })
+    ) {
       setLoading(true);
       await searchChannels(
         enableTagMode,
@@ -381,10 +451,19 @@ export const useChannelsData = () => {
     pageSz = pageSize,
     sortFlag = idSort,
   ) => {
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
+    const formValues = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchScoreRange } = formValues;
+    const { minScore, maxScore } = buildScoreQuery(formValues);
     setSearching(true);
     try {
-      if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+      if (
+        searchKeyword === '' &&
+        searchGroup === '' &&
+        searchModel === '' &&
+        searchScoreRange === '' &&
+        formValues.searchScoreMin === '' &&
+        formValues.searchScoreMax === ''
+      ) {
         await loadChannels(
           page,
           pageSz,
@@ -398,8 +477,12 @@ export const useChannelsData = () => {
 
       const typeParam = typeKey !== 'all' ? `&type=${typeKey}` : '';
       const statusParam = statusF !== 'all' ? `&status=${statusF}` : '';
+      const minScoreParam =
+        minScore !== undefined ? `&min_score=${minScore}` : '';
+      const maxScoreParam =
+        maxScore !== undefined ? `&max_score=${maxScore}` : '';
       const res = await API.get(
-        `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}`,
+        `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}${minScoreParam}${maxScoreParam}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}`,
       );
       const { success, message, data } = res.data;
       if (success) {
@@ -422,8 +505,16 @@ export const useChannelsData = () => {
 
   // Refresh
   const refresh = async (page = activePage) => {
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+    const formValues = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchScoreRange } = formValues;
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchModel === '' &&
+      searchScoreRange === '' &&
+      formValues.searchScoreMin === '' &&
+      formValues.searchScoreMax === ''
+    ) {
       await loadChannels(page, pageSize, idSort, enableTagMode);
     } else {
       await searchChannels(
@@ -518,9 +609,17 @@ export const useChannelsData = () => {
 
   // Page handlers
   const handlePageChange = (page) => {
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
+    const formValues = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchScoreRange } = formValues;
     setActivePage(page);
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchModel === '' &&
+      searchScoreRange === '' &&
+      formValues.searchScoreMin === '' &&
+      formValues.searchScoreMax === ''
+    ) {
       loadChannels(page, pageSize, idSort, enableTagMode).then(() => {});
     } else {
       searchChannels(
@@ -538,8 +637,16 @@ export const useChannelsData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+    const formValues = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchScoreRange } = formValues;
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchModel === '' &&
+      searchScoreRange === '' &&
+      formValues.searchScoreMin === '' &&
+      formValues.searchScoreMax === ''
+    ) {
       loadChannels(1, size, idSort, enableTagMode)
         .then()
         .catch((reason) => {

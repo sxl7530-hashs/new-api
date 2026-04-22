@@ -33,13 +33,13 @@ import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
 
-const UsersTable = (usersData) => {
+const UsersTable = (usersData = {}) => {
   const {
-    users,
-    loading,
-    activePage,
-    pageSize,
-    userCount,
+    users = [],
+    loading = false,
+    activePage = 1,
+    pageSize = 10,
+    userCount = 0,
     compactMode,
     handlePageChange,
     handlePageSizeChange,
@@ -104,26 +104,31 @@ const UsersTable = (usersData) => {
 
   // Modal confirm handlers
   const handlePromoteConfirm = () => {
+    if (!modalUser?.id) return;
     manageUser(modalUser.id, 'promote', modalUser);
     setShowPromoteModal(false);
   };
 
   const handleDemoteConfirm = () => {
+    if (!modalUser?.id) return;
     manageUser(modalUser.id, 'demote', modalUser);
     setShowDemoteModal(false);
   };
 
   const handleEnableDisableConfirm = () => {
+    if (!modalUser?.id) return;
     manageUser(modalUser.id, enableDisableAction, modalUser);
     setShowEnableDisableModal(false);
   };
 
   const handleResetPasskeyConfirm = async () => {
+    if (!modalUser) return;
     await resetUserPasskey(modalUser);
     setShowResetPasskeyModal(false);
   };
 
   const handleResetTwoFAConfirm = async () => {
+    if (!modalUser) return;
     await resetUserTwoFA(modalUser);
     setShowResetTwoFAModal(false);
   };

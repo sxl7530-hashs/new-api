@@ -129,14 +129,23 @@ const SystemSetting = () => {
 
   const getOptions = async () => {
     setLoading(true);
-    const res = await API.get('/api/option/');
-    const { success, message, data } = res.data;
-    if (success) {
+    try {
+      const res = await API.get('/api/option/');
+      const { success, message, data } = res?.data || {};
+      if (!success || !Array.isArray(data)) {
+        showError(message || t('加载系统设置失败'));
+        return;
+      }
+
       let newInputs = {};
       data.forEach((item) => {
         switch (item.key) {
           case 'TopupGroupRatio':
-            item.value = JSON.stringify(JSON.parse(item.value), null, 2);
+            try {
+              item.value = JSON.stringify(JSON.parse(item.value), null, 2);
+            } catch (error) {
+              item.value = '{}';
+            }
             break;
           case 'EmailDomainWhitelist':
             setEmailDomainWhitelist(item.value ? item.value.split(',') : []);
@@ -152,7 +161,7 @@ const SystemSetting = () => {
             try {
               const domains = item.value ? JSON.parse(item.value) : [];
               setDomainList(Array.isArray(domains) ? domains : []);
-            } catch (e) {
+            } catch (error) {
               setDomainList([]);
             }
             break;
@@ -160,7 +169,7 @@ const SystemSetting = () => {
             try {
               const ips = item.value ? JSON.parse(item.value) : [];
               setIpList(Array.isArray(ips) ? ips : []);
-            } catch (e) {
+            } catch (error) {
               setIpList([]);
             }
             break;
@@ -168,7 +177,7 @@ const SystemSetting = () => {
             try {
               const ports = item.value ? JSON.parse(item.value) : [];
               setAllowedPorts(Array.isArray(ports) ? ports : []);
-            } catch (e) {
+            } catch (error) {
               setAllowedPorts(['80', '443', '8080', '8443']);
             }
             break;
@@ -215,25 +224,26 @@ const SystemSetting = () => {
         }
         newInputs[item.key] = item.value;
       });
-      setInputs(newInputs);
-      setOriginInputs(newInputs);
+      const mergedInputs = { ...inputs, ...newInputs };
+      setInputs(mergedInputs);
+      setOriginInputs(mergedInputs);
+
       // 同步模式布尔到本地状态
-      if (
-        typeof newInputs['fetch_setting.domain_filter_mode'] !== 'undefined'
-      ) {
-        setDomainFilterMode(!!newInputs['fetch_setting.domain_filter_mode']);
+      if (typeof mergedInputs['fetch_setting.domain_filter_mode'] !== 'undefined') {
+        setDomainFilterMode(!!mergedInputs['fetch_setting.domain_filter_mode']);
       }
-      if (typeof newInputs['fetch_setting.ip_filter_mode'] !== 'undefined') {
-        setIpFilterMode(!!newInputs['fetch_setting.ip_filter_mode']);
+      if (typeof mergedInputs['fetch_setting.ip_filter_mode'] !== 'undefined') {
+        setIpFilterMode(!!mergedInputs['fetch_setting.ip_filter_mode']);
       }
       if (formApiRef.current) {
-        formApiRef.current.setValues(newInputs);
+        formApiRef.current.setValues(mergedInputs);
       }
       setIsLoaded(true);
-    } else {
-      showError(message);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {

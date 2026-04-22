@@ -243,6 +243,24 @@ const renderResponseTime = (responseTime, t) => {
   }
 };
 
+const renderChannelScore = (score, t) => {
+  const value = parseFloat(score);
+  if (!Number.isFinite(value) || Number.isNaN(value)) {
+    return (
+      <Tag color='grey' shape='circle'>
+        -
+      </Tag>
+    );
+  }
+  const color = value >= 80 ? 'green' : value >= 60 ? 'lime' : 'yellow';
+
+  return (
+    <Tag color={color} shape='circle'>
+      {value.toFixed(1)}
+    </Tag>
+  );
+};
+
 const isRequestPassThroughEnabled = (record) => {
   if (!record || record.children !== undefined) {
     return false;
@@ -511,6 +529,27 @@ export const getChannelsColumns = ({
       title: t('响应时间'),
       dataIndex: 'response_time',
       render: (text, record, index) => <div>{renderResponseTime(text, t)}</div>,
+    },
+    {
+      key: COLUMN_KEYS.SCORE,
+      title: t('评分'),
+      dataIndex: 'score',
+      sorter: (a, b) => {
+        const scoreA = parseFloat(a?.score);
+        const scoreB = parseFloat(b?.score);
+        const va =
+          Number.isFinite(scoreA) && !Number.isNaN(scoreA) ? scoreA : -1;
+        const vb =
+          Number.isFinite(scoreB) && !Number.isNaN(scoreB) ? scoreB : -1;
+        return va - vb;
+      },
+      defaultSortOrder: 'descend',
+      render: (text, record, index) => {
+        if (record.children === undefined) {
+          return <div>{renderChannelScore(text, t)}</div>;
+        }
+        return '-';
+      },
     },
     {
       key: COLUMN_KEYS.BALANCE,

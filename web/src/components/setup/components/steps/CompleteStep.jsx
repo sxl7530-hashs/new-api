@@ -33,6 +33,22 @@ const CompleteStep = ({
   renderNavigationButtons,
   t,
 }) => {
+  const safeSetupStatus = setupStatus || {};
+
+  const getDatabaseTypeLabel = (dbType = '') => {
+    switch ((dbType || '').toLowerCase()) {
+      case 'sqlite':
+        return 'SQLite';
+      case 'mysql':
+        return 'MySQL';
+      case 'postgres':
+      case 'postgresql':
+        return 'PostgreSQL';
+      default:
+        return t('未知');
+    }
+  };
+
   return (
     <div className='text-center'>
       <Avatar color='green' className='mx-auto mb-4 shadow-lg'>
@@ -47,14 +63,10 @@ const CompleteStep = ({
 
       <Descriptions>
         <Descriptions.Item itemKey={t('数据库类型')}>
-          {setupStatus.database_type === 'sqlite'
-            ? 'SQLite'
-            : setupStatus.database_type === 'mysql'
-              ? 'MySQL'
-              : 'PostgreSQL'}
+          {getDatabaseTypeLabel(safeSetupStatus.database_type)}
         </Descriptions.Item>
         <Descriptions.Item itemKey={t('管理员账号')}>
-          {setupStatus.root_init
+          {safeSetupStatus.root_init
             ? t('已初始化')
             : formData.username || t('未设置')}
         </Descriptions.Item>

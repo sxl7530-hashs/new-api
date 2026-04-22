@@ -228,13 +228,23 @@ const SetupWizard = () => {
 
   // 获取步骤内容
   const getStepContent = (step) => {
+    const safeStatus = setupStatus || {};
+
+    if (safeStatus === null || safeStatus === undefined) {
+      return (
+        <div className='py-6 text-sm text-gray-500'>
+          {t('正在初始化页面，请稍后重试')}
+        </div>
+      );
+    }
+
     switch (step) {
       case 0:
-        return <DatabaseStep setupStatus={setupStatus} t={t} />;
+        return <DatabaseStep setupStatus={safeStatus} t={t} />;
       case 1:
         return (
           <AdminStep
-            setupStatus={setupStatus}
+            setupStatus={safeStatus}
             formData={formData}
             setFormData={setFormData}
             formRef={formRef}
@@ -251,7 +261,11 @@ const SetupWizard = () => {
         );
       case 3:
         return (
-          <CompleteStep setupStatus={setupStatus} formData={formData} t={t} />
+          <CompleteStep
+            setupStatus={safeStatus}
+            formData={formData}
+            t={t}
+          />
         );
       default:
         return null;
@@ -298,29 +312,56 @@ const SetupWizard = () => {
           <Divider margin='12px' />
 
           {/* 表单容器 */}
-          <Form
-            getFormApi={(formApi) => {
-              formRef.current = formApi;
-            }}
-            initValues={formData}
-          >
-            {/* 步骤内容：保持所有字段挂载，仅隐藏非当前步骤 */}
-            <div className='steps-content'>
-              {[0, 1, 2, 3].map((idx) => (
+        <Form
+          getFormApi={(formApi) => {
+            formRef.current = formApi;
+          }}
+          initValues={formData}
+        >
+          {/* 步骤内容：保持所有字段挂载，仅隐藏非当前步骤 */}
+          <div className='steps-content'>
+            {[0, 1, 2, 3].map((idx) => {
+              let stepContent;
+              try {
+                stepContent = getStepContent(idx);
+              } catch (error) {
+                console.error('[SetupWizard] render step failed:', error);
+                stepContent = (
+                  <div className='py-6 text-sm text-red-600'>
+                    {t('步骤内容渲染失败，请返回重试。')}
+                  </div>
+                );
+              }
+
+              if (!React.isValidElement(stepContent)) {
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      display: currentStep === idx ? 'block' : 'none',
+                    }}
+                  >
+                    {stepContent}
+                  </div>
+                );
+              }
+
+              return (
                 <div
                   key={idx}
                   style={{ display: currentStep === idx ? 'block' : 'none' }}
                 >
-                  {React.cloneElement(getStepContent(idx), {
+                  {React.cloneElement(stepContent, {
                     ...stepNavigationProps,
                     renderNavigationButtons: () => (
                       <StepNavigation {...stepNavigationProps} />
                     ),
                   })}
                 </div>
-              ))}
-            </div>
-          </Form>
+              );
+            })}
+          </div>
+        </Form>
         </Card>
       </div>
     </div>

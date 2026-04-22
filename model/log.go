@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -37,6 +38,16 @@ type Log struct {
 	Ip               string `json:"ip" gorm:"index;default:''"`
 	RequestId        string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	Other            string `json:"other"`
+}
+
+type ChannelRoutingSampleStat struct {
+	ChannelId       int
+	SuccessCount    int64
+	ErrorCount      int64
+	TotalCount      int64
+	AverageUseTime  float64
+	CacheTokenCount float64
+	TotalTokenCount float64
 }
 
 // don't use iota, avoid change log type value
@@ -262,6 +273,120 @@ type RecordTaskBillingLogParams struct {
 	TokenId   int
 	Group     string
 	Other     map[string]interface{}
+}
+
+func interfaceToFloat64(v any) float64 {
+	switch val := v.(type) {
+	case nil:
+		return 0
+	case float64:
+		return val
+	case float32:
+		return float64(val)
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case int32:
+		return float64(val)
+	case uint:
+		return float64(val)
+	case uint64:
+		return float64(val)
+	case uint32:
+		return float64(val)
+	case string:
+		if val == "" {
+			return 0
+		}
+		f, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return 0
+		}
+		return f
+	default:
+		return 0
+	}
+}
+
+func GetRecentChannelRoutingStats(group string, model string, channelIds []int, sampleSize int) (map[int]ChannelRoutingSampleStat, error) {
+	result := make(map[int]ChannelRoutingSampleStat)
+	if len(channelIds) == 0 {
+		return result, nil
+	}
+	if sampleSize <= 0 {
+		sampleSize = 20
+	}
+
+	clean := make([]int, 0, len(channelIds))
+	seen := make(map[int]struct{})
+	for _, channelId := range channelIds {
+		if channelId <= 0 {
+			continue
+		}
+		if _, ok := seen[channelId]; ok {
+			continue
+		}
+		seen[channelId] = struct{}{}
+		clean = append(clean, channelId)
+		result[channelId] = ChannelRoutingSampleStat{ChannelId: channelId}
+	}
+
+	for _, channelId := range clean {
+		var logs []*Log
+		err := LOG_DB.
+			Model(&Log{}).
+			Select("type, use_time, prompt_tokens, completion_tokens, other").
+			Where(fmt.Sprintf("%s = ? AND model_name = ? AND channel_id = ?", logGroupCol), group, model, channelId).
+			Where("type IN ?", []int{LogTypeConsume, LogTypeError}).
+			Order("id desc").
+			Limit(sampleSize).
+			Find(&logs).Error
+		if err != nil {
+			return nil, err
+		}
+
+		stat := result[channelId]
+		stat.SuccessCount = 0
+		stat.ErrorCount = 0
+		stat.TotalCount = 0
+		stat.TotalTokenCount = 0
+		stat.CacheTokenCount = 0
+
+		var useTimeTotal int64
+		for _, logItem := range logs {
+			if logItem == nil {
+				continue
+			}
+			tokenCount := float64(logItem.PromptTokens + logItem.CompletionTokens)
+			stat.TotalTokenCount += tokenCount
+
+			if logItem.Type == LogTypeConsume {
+				stat.SuccessCount++
+			} else if logItem.Type == LogTypeError {
+				stat.ErrorCount++
+			}
+			stat.TotalCount++
+			useTimeTotal += int64(logItem.UseTime)
+
+			otherMap, err := common.StrToMap(logItem.Other)
+			if err != nil {
+				continue
+			}
+			stat.CacheTokenCount += interfaceToFloat64(otherMap["cache_tokens"])
+			stat.CacheTokenCount += interfaceToFloat64(otherMap["cache_write_tokens"])
+			stat.CacheTokenCount += interfaceToFloat64(otherMap["cache_prompt_tokens"])
+			stat.CacheTokenCount += interfaceToFloat64(otherMap["cache_completion_tokens"])
+			stat.CacheTokenCount += interfaceToFloat64(otherMap["cache_hit_tokens"])
+		}
+
+		if stat.TotalCount > 0 {
+			stat.AverageUseTime = float64(useTimeTotal) / float64(stat.TotalCount)
+		}
+		result[channelId] = stat
+	}
+
+	return result, nil
 }
 
 func RecordTaskBillingLog(params RecordTaskBillingLogParams) {

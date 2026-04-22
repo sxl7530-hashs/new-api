@@ -21,11 +21,13 @@ import (
 )
 
 func TestStatus(c *gin.Context) {
+	dbStatus := model.GetDatabasePingState()
 	err := model.PingDB()
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"success": false,
-			"message": "数据库连接失败",
+			"success":    false,
+			"message":    "数据库连接失败",
+			"db_status": dbStatus,
 		})
 		return
 	}
@@ -34,6 +36,7 @@ func TestStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success":    true,
 		"message":    "Server is running",
+		"db_status":  dbStatus,
 		"http_stats": httpStats,
 	})
 	return

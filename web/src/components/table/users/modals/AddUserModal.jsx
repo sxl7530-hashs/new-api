@@ -53,17 +53,22 @@ const AddUserModal = (props) => {
 
   const submit = async (values) => {
     setLoading(true);
-    const res = await API.post(`/api/user/`, values);
-    const { success, message } = res.data;
-    if (success) {
-      showSuccess(t('用户账户创建成功！'));
-      formApiRef.current?.setValues(getInitValues());
-      props.refresh();
-      props.handleClose();
-    } else {
-      showError(message);
+    try {
+      const res = await API.post(`/api/user/`, values);
+      const { success, message } = res?.data || {};
+      if (success) {
+        showSuccess(t('用户账户创建成功！'));
+        formApiRef.current?.setValues(getInitValues());
+        props.refresh();
+        props.handleClose();
+      } else {
+        showError(message || t('创建失败'));
+      }
+    } catch (error) {
+      showError(error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleCancel = () => {

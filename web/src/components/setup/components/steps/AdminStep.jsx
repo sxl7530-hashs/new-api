@@ -33,9 +33,11 @@ const AdminStep = ({
   renderNavigationButtons,
   t,
 }) => {
+  const isRootInitialized = Boolean(setupStatus?.root_init);
+
   return (
     <>
-      {setupStatus.root_init ? (
+      {isRootInitialized ? (
         <Banner
           type='info'
           closeIcon={null}

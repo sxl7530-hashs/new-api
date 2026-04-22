@@ -55,6 +55,7 @@ type Channel struct {
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
+	Score float64 `json:"score" gorm:"-"`
 }
 
 type ChannelInfo struct {
@@ -289,53 +290,185 @@ func GetChannelsByTag(tag string, idSort bool, selectAll bool) ([]*Channel, erro
 	return channels, err
 }
 
-func SearchChannels(keyword string, group string, model string, idSort bool) ([]*Channel, error) {
-	var channels []*Channel
-	modelsCol := "`models`"
+func buildChannelSearchQuery(keyword string, group string, modelName string, statusFilter int, typeFilter int, db *gorm.DB) *gorm.DB {
+	query := db.Model(&Channel{}).Omit("key")
+	conditions := make([]string, 0, 3)
+	args := make([]interface{}, 0)
 
-	// 如果是 PostgreSQL，使用双引号
+	modelColumn := "`models`"
 	if common.UsingPostgreSQL {
-		modelsCol = `"models"`
+		modelColumn = `"models"`
 	}
 
 	baseURLCol := "`base_url`"
-	// 如果是 PostgreSQL，使用双引号
 	if common.UsingPostgreSQL {
 		baseURLCol = `"base_url"`
 	}
+
+	trimmedGroup := strings.TrimSpace(group)
+	trimmedModel := strings.TrimSpace(modelName)
+	groupCondition := ""
+	if trimmedGroup != "" && trimmedGroup != "null" {
+		if common.UsingMySQL {
+			groupCondition = `CONCAT(',', ` + commonGroupCol + `, ',') LIKE ?`
+		} else {
+			groupCondition = `(',' || ` + commonGroupCol + ` || ',') LIKE ?`
+		}
+		conditions = append(conditions, groupCondition)
+		args = append(args, "%,"+trimmedGroup+",%")
+	}
+
+	keywordCondition := "1=1"
+	var keywordArgs []interface{}
+	trimmedKeyword := strings.TrimSpace(keyword)
+	if trimmedKeyword != "" {
+		keywordCondition = "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?)"
+		keywordArgs = append(keywordArgs, common.String2Int(trimmedKeyword), "%"+trimmedKeyword+"%", trimmedKeyword, "%"+trimmedKeyword+"%")
+	}
+	modelCondition := ""
+	if trimmedModel != "" && trimmedModel != "null" {
+		modelCondition = modelColumn + " LIKE ?"
+		conditions = append(conditions, modelCondition)
+		args = append(args, "%"+trimmedModel+"%")
+	}
+
+	if keywordCondition != "1=1" {
+		conditions = append(conditions, keywordCondition)
+	}
+	keywordArgsLen := len(keywordArgs)
+	if keywordArgsLen > 0 {
+		args = append(args, keywordArgs...)
+	}
+
+	if len(conditions) > 0 {
+		query = query.Where(strings.Join(conditions, " AND "), args...)
+	}
+
+	if statusFilter == common.ChannelStatusEnabled {
+		query = query.Where("status = ?", common.ChannelStatusEnabled)
+	} else if statusFilter == 0 {
+		query = query.Where("status != ?", common.ChannelStatusEnabled)
+	}
+
+	if typeFilter >= 0 {
+		query = query.Where("type = ?", typeFilter)
+	}
+
+	return query
+}
+
+func SearchChannels(keyword string, group string, model string, statusFilter int, typeFilter int, idSort bool, page int, pageSize int) ([]*Channel, int64, map[int64]int64, error) {
+	return SearchChannelsWithScoreRange(
+		keyword,
+		group,
+		model,
+		statusFilter,
+		typeFilter,
+		nil,
+		nil,
+		idSort,
+		page,
+		pageSize,
+	)
+}
+
+func SearchChannelsWithScoreRange(
+	keyword string,
+	group string,
+	model string,
+	statusFilter int,
+	typeFilter int,
+	minScore *float64,
+	maxScore *float64,
+	idSort bool,
+	page int,
+	pageSize int,
+) ([]*Channel, int64, map[int64]int64, error) {
+	var channels []*Channel
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	scoreFilterEnabled := minScore != nil || maxScore != nil
+
+	query := buildChannelSearchQuery(keyword, group, model, statusFilter, typeFilter, DB)
 
 	order := "priority desc"
 	if idSort {
 		order = "id desc"
 	}
 
-	// 构造基础查询
-	baseQuery := DB.Model(&Channel{}).Omit("key")
-
-	// 构造WHERE子句
-	var whereClause string
-	var args []interface{}
-	if group != "" && group != "null" {
-		var groupCondition string
-		if common.UsingMySQL {
-			groupCondition = `CONCAT(',', ` + commonGroupCol + `, ',') LIKE ?`
-		} else {
-			// sqlite, PostgreSQL
-			groupCondition = `(',' || ` + commonGroupCol + ` || ',') LIKE ?`
+	if scoreFilterEnabled {
+		dataQuery := query.Session(&gorm.Session{}).Order(order)
+		if err := dataQuery.Find(&channels).Error; err != nil {
+			return nil, 0, nil, err
 		}
-		whereClause = "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + ` LIKE ? AND ` + groupCondition
-		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+keyword+"%", "%"+model+"%", "%,"+group+",%")
-	} else {
-		whereClause = "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"
-		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+keyword+"%", "%"+model+"%")
+
+		scores := GetChannelDisplayScores(channels, 20)
+		filtered := make([]*Channel, 0, len(channels))
+		for _, channel := range channels {
+			if channel == nil {
+				continue
+			}
+			channel.Score = scores[channel.Id]
+			if minScore != nil && channel.Score < *minScore {
+				continue
+			}
+			if maxScore != nil && channel.Score > *maxScore {
+				continue
+			}
+			filtered = append(filtered, channel)
+		}
+
+		channels = filtered
+		var total int64 = int64(len(channels))
+		typeCounts := make(map[int64]int64)
+		for _, row := range channels {
+			if row == nil {
+				continue
+			}
+			typeCounts[int64(row.Type)]++
+		}
+
+		startIdx := (page - 1) * pageSize
+		if startIdx > int(total) {
+			startIdx = int(total)
+		}
+		endIdx := startIdx + pageSize
+		if endIdx > int(total) {
+			endIdx = int(total)
+		}
+		return channels[startIdx:endIdx], total, typeCounts, nil
 	}
 
-	// 执行查询
-	err := baseQuery.Where(whereClause, args...).Order(order).Find(&channels).Error
-	if err != nil {
-		return nil, err
+	totalQuery := query.Session(&gorm.Session{})
+	var total int64
+	if err := totalQuery.Count(&total).Error; err != nil {
+		return nil, 0, nil, err
 	}
-	return channels, nil
+
+	dataQuery := query.Session(&gorm.Session{}).Order(order).Limit(pageSize).Offset((page - 1) * pageSize)
+	err := dataQuery.Find(&channels).Error
+	if err != nil {
+		return nil, 0, nil, err
+	}
+
+	var countResults []struct {
+		Type  int64
+		Count int64
+	}
+	countQuery := query.Session(&gorm.Session{})
+	if err = countQuery.Select("type, count(*) as count").Group("type").Find(&countResults).Error; err != nil {
+		return nil, 0, nil, err
+	}
+	typeCounts := make(map[int64]int64)
+	for _, row := range countResults {
+		typeCounts[row.Type] = row.Count
+	}
+
+	return channels, total, typeCounts, nil
 }
 
 func GetChannelById(id int, selectAll bool) (*Channel, error) {

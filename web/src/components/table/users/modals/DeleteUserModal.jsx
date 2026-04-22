@@ -32,10 +32,14 @@ const DeleteUserModal = ({
   t,
 }) => {
   const handleConfirm = async () => {
+    if (!user?.id) {
+      onCancel();
+      return;
+    }
     await manageUser(user.id, 'delete', user);
     await refresh();
     setTimeout(() => {
-      if (users.length === 0 && activePage > 1) {
+      if ((users || []).length === 0 && activePage > 1) {
         refresh(activePage - 1);
       }
     }, 100);

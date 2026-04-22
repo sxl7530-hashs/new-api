@@ -63,26 +63,35 @@ export const useUsersData = () => {
 
   // Set user format with key field
   const setUserFormat = (users) => {
-    for (let i = 0; i < users.length; i++) {
-      users[i].key = users[i].id;
+    if (!Array.isArray(users) || users.length === 0) {
+      setUsers([]);
+      return;
     }
-    setUsers(users);
+    const normalizedUsers = users
+      .filter((item) => item && typeof item.id !== 'undefined')
+      .map((item) => ({ ...item, key: item.id }));
+    setUsers(normalizedUsers);
   };
 
   // Load users data
   const loadUsers = async (startIdx, pageSize) => {
     setLoading(true);
-    const res = await API.get(`/api/user/?p=${startIdx}&page_size=${pageSize}`);
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setUserCount(data.total);
+    try {
+      const res = await API.get(`/api/user/?p=${startIdx}&page_size=${pageSize}`);
+      const { success, message, data } = res?.data || {};
+      if (!res || !success || !data) {
+        showError(message || t('加载用户列表失败'));
+        return;
+      }
+      const newPageData = data.items || [];
+      setActivePage(Number(data.page || 1));
+      setUserCount(Number(data.total || 0));
       setUserFormat(newPageData);
-    } else {
-      showError(message);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Search users with keyword and group
@@ -105,35 +114,52 @@ export const useUsersData = () => {
       return;
     }
     setSearching(true);
-    const res = await API.get(
-      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
-    );
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setUserCount(data.total);
+    try {
+      const query = new URLSearchParams({
+        keyword: searchKeyword,
+        group: searchGroup,
+        p: String(startIdx),
+        page_size: String(pageSize),
+      }).toString();
+      const res = await API.get(`/api/user/search?${query}`);
+      const { success, message, data } = res?.data || {};
+      if (!res || !success || !data) {
+        showError(message || t('搜索用户失败'));
+        return;
+      }
+      const newPageData = data.items || [];
+      setActivePage(Number(data.page || 1));
+      setUserCount(Number(data.total || 0));
       setUserFormat(newPageData);
-    } else {
-      showError(message);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setSearching(false);
     }
-    setSearching(false);
   };
 
   // Manage user operations (promote, demote, enable, disable, delete)
   const manageUser = async (userId, action, record) => {
     // Trigger loading state to force table re-render
     setLoading(true);
+    try {
+      const res = await API.post('/api/user/manage', {
+        id: userId,
+        action,
+      });
 
-    const res = await API.post('/api/user/manage', {
-      id: userId,
-      action,
-    });
+      const { success, message, data } = res?.data || {};
+      if (!res || !success) {
+        showError(message || t('操作失败，请重试'));
+        return;
+      }
+      if (!data) {
+        await refresh();
+        return;
+      }
 
-    const { success, message } = res.data;
-    if (success) {
       showSuccess(t('操作成功完成！'));
-      const user = res.data.data;
+      const user = data;
 
       // Create a new array and new object to ensure React detects changes
       const newUsers = users.map((u) => {
@@ -147,11 +173,11 @@ export const useUsersData = () => {
       });
 
       setUsers(newUsers);
-    } else {
-      showError(message);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const resetUserPasskey = async (user) => {
@@ -160,12 +186,12 @@ export const useUsersData = () => {
     }
     try {
       const res = await API.delete(`/api/user/${user.id}/reset_passkey`);
-      const { success, message } = res.data;
-      if (success) {
-        showSuccess(t('Passkey 已重置'));
-      } else {
+      const { success, message } = res?.data || {};
+      if (!res || !success) {
         showError(message || t('操作失败，请重试'));
+        return;
       }
+      showSuccess(t('Passkey 已重置'));
     } catch (error) {
       showError(t('操作失败，请重试'));
     }
@@ -177,12 +203,12 @@ export const useUsersData = () => {
     }
     try {
       const res = await API.delete(`/api/user/${user.id}/2fa`);
-      const { success, message } = res.data;
-      if (success) {
-        showSuccess(t('二步验证已重置'));
-      } else {
+      const { success, message } = res?.data || {};
+      if (!res || !success) {
         showError(message || t('操作失败，请重试'));
+        return;
       }
+      showSuccess(t('二步验证已重置'));
     } catch (error) {
       showError(t('操作失败，请重试'));
     }
@@ -204,7 +230,7 @@ export const useUsersData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadUsers(activePage, size)
+    loadUsers(1, size)
       .then()
       .catch((reason) => {
         showError(reason);
@@ -213,6 +239,9 @@ export const useUsersData = () => {
 
   // Handle table row styling for disabled/deleted users
   const handleRow = (record, index) => {
+    if (!record) {
+      return {};
+    }
     if (record.DeletedAt !== null || record.status !== 1) {
       return {
         style: {
@@ -237,12 +266,18 @@ export const useUsersData = () => {
   // Fetch groups data
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
-      if (res === undefined) {
+      const res = await API.get(`/api/group/`);
+      const { success, message, data } = res?.data || {};
+      if (!res || !success || !Array.isArray(data)) {
+        showError(message || t('加载分组列表失败'));
+        return;
+      }
+      if (data.length === 0) {
+        setGroupOptions([]);
         return;
       }
       setGroupOptions(
-        res.data.data.map((group) => ({
+        data.map((group) => ({
           label: group,
           value: group,
         })),
@@ -266,7 +301,7 @@ export const useUsersData = () => {
 
   // Initialize data on component mount
   useEffect(() => {
-    loadUsers(0, pageSize)
+    loadUsers(1, pageSize)
       .then()
       .catch((reason) => {
         showError(reason);

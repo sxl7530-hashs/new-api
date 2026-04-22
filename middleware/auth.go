@@ -33,6 +33,42 @@ func validUserInfo(username string, role int) bool {
 	return true
 }
 
+func toInt(v any) (int, bool) {
+	switch value := v.(type) {
+	case int:
+		return value, true
+	case int64:
+		return int(value), true
+	case int32:
+		return int(value), true
+	case int16:
+		return int(value), true
+	case int8:
+		return int(value), true
+	case float64:
+		return int(value), true
+	case float32:
+		return int(value), true
+	case uint:
+		return int(value), true
+	case uint64:
+		return int(value), true
+	case uint32:
+		return int(value), true
+	case uint16:
+		return int(value), true
+	case uint8:
+		return int(value), true
+	default:
+		return 0, false
+	}
+}
+
+func toString(v any) (string, bool) {
+	value, ok := v.(string)
+	return value, ok
+}
+
 func authHelper(c *gin.Context, minRole int) {
 	session := sessions.Default(c)
 	username := session.Get("username")
@@ -92,9 +128,34 @@ func authHelper(c *gin.Context, minRole int) {
 			return
 		}
 	}
+	sessionRole, roleOk := toInt(role)
+	sessionStatus, statusOk := toInt(status)
+	sessionUsername, usernameOk := toString(username)
+	if username == nil || !usernameOk || !roleOk || !statusOk {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid),
+		})
+		c.Abort()
+		return
+	}
+	sessionUserIdFromSession, _ := toInt(session.Get("id"))
 	// get header New-Api-User
 	apiUserIdStr := c.Request.Header.Get("New-Api-User")
 	if apiUserIdStr == "" {
+		// For session-auth flows, avoid hard dependency on client-side persisted header.
+		// Frontend headers are set from localStorage and may become stale in some browser states,
+		// causing false unauthorized. Token-based auth should continue to require token validation only.
+		if sessionUserIdFromSession != 0 && !useAccessToken {
+			c.Set("username", username)
+			c.Set("role", sessionRole)
+			c.Set("id", id)
+			c.Set("group", session.Get("group"))
+			c.Set("user_group", session.Get("group"))
+			c.Set("use_access_token", useAccessToken)
+			c.Next()
+			return
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
 			"message": common.TranslateMessage(c, i18n.MsgAuthUserIdNotProvided),
@@ -113,14 +174,18 @@ func authHelper(c *gin.Context, minRole int) {
 
 	}
 	if id != apiUserId {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": common.TranslateMessage(c, i18n.MsgAuthUserIdMismatch),
-		})
-		c.Abort()
-		return
+		if sessionUserIdFromSession != 0 && sessionUserIdFromSession == apiUserId {
+			id = apiUserId
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthUserIdMismatch),
+			})
+			c.Abort()
+			return
+		}
 	}
-	if status.(int) == common.UserStatusDisabled {
+	if sessionStatus == common.UserStatusDisabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": common.TranslateMessage(c, i18n.MsgAuthUserBanned),
@@ -128,7 +193,7 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
-	if role.(int) < minRole {
+	if sessionRole < minRole {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
@@ -136,7 +201,7 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
-	if !validUserInfo(username.(string), role.(int)) {
+	if !validUserInfo(sessionUsername, sessionRole) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid),
@@ -146,8 +211,8 @@ func authHelper(c *gin.Context, minRole int) {
 	}
 	// 防止不同newapi版本冲突，导致数据不通用
 	c.Header("Auth-Version", "864b7076dbcd0a3c01b5520316720ebf")
-	c.Set("username", username)
-	c.Set("role", role)
+	c.Set("username", sessionUsername)
+	c.Set("role", sessionRole)
 	c.Set("id", id)
 	c.Set("group", session.Get("group"))
 	c.Set("user_group", session.Get("group"))

@@ -36,6 +36,13 @@ const ChannelsFilters = ({
   searching,
   t,
 }) => {
+  const scoreRangeOptions = [
+    { label: t('全部评分'), value: '' },
+    { label: t('低于60'), value: 'under_60' },
+    { label: t('60-79.9'), value: '60_79_9' },
+    { label: t('80及以上'), value: '80_plus' },
+  ];
+
   return (
     <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
       <div className='flex gap-2 w-full md:w-auto order-2 md:order-1'>
@@ -119,6 +126,57 @@ const ChannelsFilters = ({
               pure
               onChange={() => {
                 // 延迟执行搜索，让表单值先更新
+                setTimeout(() => {
+                  searchChannels(enableTagMode);
+                }, 0);
+              }}
+            />
+          </div>
+          <div className='w-full md:w-40'>
+            <Form.Select
+              size='small'
+              field='searchScoreRange'
+              placeholder={t('评分区间')}
+              optionList={scoreRangeOptions}
+              className='w-full'
+              showClear
+              pure
+              onChange={() => {
+                // 延迟执行搜索，让表单值先更新
+                setTimeout(() => {
+                  searchChannels(enableTagMode);
+                }, 0);
+              }}
+            />
+          </div>
+          <div className='w-full md:w-28'>
+            <Form.InputNumber
+              size='small'
+              field='searchScoreMin'
+              min={0}
+              precision={2}
+              prefix={t('>')}
+              placeholder={t('最低评分')}
+              showClear
+              pure
+              onChange={() => {
+                setTimeout(() => {
+                  searchChannels(enableTagMode);
+                }, 0);
+              }}
+            />
+          </div>
+          <div className='w-full md:w-28'>
+            <Form.InputNumber
+              size='small'
+              field='searchScoreMax'
+              min={0}
+              precision={2}
+              prefix={t('<')}
+              placeholder={t('最高评分')}
+              showClear
+              pure
+              onChange={() => {
                 setTimeout(() => {
                   searchChannels(enableTagMode);
                 }, 0);

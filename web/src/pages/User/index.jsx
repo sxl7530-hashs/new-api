@@ -18,12 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import UsersTable from '../../components/table/users';
+import UsersPage from '../../components/table/users';
 
 const User = () => {
   return (
     <div className='mt-[60px] px-2'>
-      <UsersTable />
+      <UsersPage />
     </div>
   );
 };

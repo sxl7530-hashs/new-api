@@ -98,8 +98,13 @@ const EditUserModal = (props) => {
 
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
-      setGroupOptions(res.data.data.map((g) => ({ label: g, value: g })));
+      const res = await API.get(`/api/group/`);
+      const { success, message, data } = res?.data || {};
+      if (!success || !Array.isArray(data)) {
+        showError(message || t('加载分组列表失败'));
+        return;
+      }
+      setGroupOptions(data.map((g) => ({ label: g, value: g })));
     } catch (e) {
       showError(e.message);
     }
@@ -109,19 +114,24 @@ const EditUserModal = (props) => {
 
   const loadUser = async () => {
     setLoading(true);
-    const url = userId ? `/api/user/${userId}` : `/api/user/self`;
-    const res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      data.password = '';
-      data.quota_amount = Number(
-        quotaToDisplayAmount(data.quota || 0).toFixed(6),
-      );
-      setInputs({ ...getInitValues(), ...data });
-    } else {
-      showError(message);
+    try {
+      const url = userId ? `/api/user/${userId}` : `/api/user/self`;
+      const res = await API.get(url);
+      const { success, message, data } = res?.data || {};
+      if (success && data) {
+        data.password = '';
+        data.quota_amount = Number(
+          quotaToDisplayAmount(data.quota || 0).toFixed(6),
+        );
+        setInputs({ ...getInitValues(), ...data });
+      } else {
+        showError(message || t('加载用户信息失败'));
+      }
+    } catch (e) {
+      showError(e.message || t('加载用户信息失败'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -147,23 +157,28 @@ const EditUserModal = (props) => {
   /* ----------------------- submit ----------------------- */
   const submit = async (values) => {
     setLoading(true);
-    let payload = { ...values };
-    delete payload.quota;
-    delete payload.quota_amount;
-    if (userId) {
-      payload.id = parseInt(userId);
+    try {
+      let payload = { ...values };
+      delete payload.quota;
+      delete payload.quota_amount;
+      if (userId) {
+        payload.id = parseInt(userId);
+      }
+      const url = userId ? `/api/user/` : `/api/user/self`;
+      const res = await API.put(url, payload);
+      const { success, message } = res?.data || {};
+      if (success) {
+        showSuccess(t('用户信息更新成功！'));
+        props.refresh();
+        props.handleClose();
+      } else {
+        showError(message || t('操作失败，请重试'));
+      }
+    } catch (error) {
+      showError(error);
+    } finally {
+      setLoading(false);
     }
-    const url = userId ? `/api/user/` : `/api/user/self`;
-    const res = await API.put(url, payload);
-    const { success, message } = res.data;
-    if (success) {
-      showSuccess(t('用户信息更新成功！'));
-      props.refresh();
-      props.handleClose();
-    } else {
-      showError(message);
-    }
-    setLoading(false);
   };
 
   /* --------------------- atomic quota adjust -------------------- */
@@ -179,15 +194,16 @@ const EditUserModal = (props) => {
         mode: adjustMode,
         value: adjustMode === 'override' ? quotaVal : Math.abs(quotaVal),
       });
-      const { success, message } = res.data;
+      const { success, message } = res?.data || {};
       if (success) {
         showSuccess(t('调整额度成功'));
         setAdjustModalOpen(false);
         setAdjustQuotaLocal('');
         setAdjustAmountLocal('');
         const userRes = await API.get(`/api/user/${userId}`);
-        if (userRes.data.success) {
-          const data = userRes.data.data;
+        const userDetail = userRes?.data || {};
+        if (userDetail.success && userDetail.data) {
+          const data = userDetail.data;
           data.password = '';
           data.quota_amount = Number(
             quotaToDisplayAmount(data.quota || 0).toFixed(6),

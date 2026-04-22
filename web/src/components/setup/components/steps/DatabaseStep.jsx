@@ -25,6 +25,8 @@ import { Banner } from '@douyinfe/semi-ui';
  * 显示当前数据库类型和相关警告信息
  */
 const DatabaseStep = ({ setupStatus, renderNavigationButtons, t }) => {
+  const dbType = (setupStatus?.database_type || '').toLowerCase();
+
   // 检测是否在 Electron 环境中运行
   const isElectron =
     typeof window !== 'undefined' && window.electron?.isElectron;
@@ -32,7 +34,7 @@ const DatabaseStep = ({ setupStatus, renderNavigationButtons, t }) => {
   return (
     <>
       {/* 数据库警告 */}
-      {setupStatus.database_type === 'sqlite' && (
+      {dbType === 'sqlite' && (
         <Banner
           type={isElectron ? 'info' : 'warning'}
           closeIcon={null}
@@ -82,7 +84,7 @@ const DatabaseStep = ({ setupStatus, renderNavigationButtons, t }) => {
       )}
 
       {/* MySQL数据库提示 */}
-      {setupStatus.database_type === 'mysql' && (
+      {dbType === 'mysql' && (
         <Banner
           type='success'
           closeIcon={null}
@@ -103,7 +105,7 @@ const DatabaseStep = ({ setupStatus, renderNavigationButtons, t }) => {
       )}
 
       {/* PostgreSQL数据库提示 */}
-      {setupStatus.database_type === 'postgres' && (
+      {(dbType === 'postgres' || dbType === 'postgresql') && (
         <Banner
           type='success'
           closeIcon={null}
@@ -115,6 +117,21 @@ const DatabaseStep = ({ setupStatus, renderNavigationButtons, t }) => {
                   '您正在使用 PostgreSQL 数据库。PostgreSQL 是一个功能强大的开源关系型数据库系统，提供了出色的可靠性和数据完整性，适合生产环境使用。',
                 )}
               </p>
+            </div>
+          }
+          className='!rounded-lg'
+          fullMode={false}
+          bordered
+        />
+      )}
+      {!['sqlite', 'mysql', 'postgres', 'postgresql'].includes(dbType) && (
+        <Banner
+          type='warning'
+          closeIcon={null}
+          title={t('数据库类型识别失败')}
+          description={
+            <div>
+              <p>{t('无法识别当前数据库类型，请检查服务端配置或稍后重试。')}</p>
             </div>
           }
           className='!rounded-lg'

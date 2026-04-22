@@ -367,7 +367,10 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		tokenName := c.GetString("token_name")
 		modelName := c.GetString("original_model")
 		tokenId := c.GetInt("token_id")
-		userGroup := c.GetString("group")
+		userGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+		if userGroup == "" {
+			userGroup = c.GetString("group")
+		}
 		channelId := c.GetInt("channel_id")
 		other := make(map[string]interface{})
 		if c.Request != nil && c.Request.URL != nil {

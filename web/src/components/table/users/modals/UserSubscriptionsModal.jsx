@@ -138,10 +138,11 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
     setPlansLoading(true);
     try {
       const res = await API.get('/api/subscription/admin/plans');
-      if (res.data?.success) {
-        setPlans(res.data.data || []);
+      const { success, data, message } = res?.data || {};
+      if (success) {
+        setPlans(Array.isArray(data) ? data : []);
       } else {
-        showError(res.data?.message || t('加载失败'));
+        showError(message || t('加载失败'));
       }
     } catch (e) {
       showError(t('请求失败'));
@@ -157,12 +158,13 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
       const res = await API.get(
         `/api/subscription/admin/users/${user.id}/subscriptions`,
       );
-      if (res.data?.success) {
-        const next = res.data.data || [];
+      const { success, data, message } = res?.data || {};
+      if (success) {
+        const next = Array.isArray(data) ? data : [];
         setSubs(next);
         setCurrentPage(1);
       } else {
-        showError(res.data?.message || t('加载失败'));
+        showError(message || t('加载失败'));
       }
     } catch (e) {
       showError(t('请求失败'));
@@ -200,14 +202,15 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
           plan_id: selectedPlanId,
         },
       );
-      if (res.data?.success) {
-        const msg = res.data?.data?.message;
+      const { success, message, data } = res?.data || {};
+      if (success) {
+        const msg = data?.message;
         showSuccess(msg ? msg : t('新增成功'));
         setSelectedPlanId(null);
         await loadUserSubscriptions();
         onSuccess?.();
       } else {
-        showError(res.data?.message || t('新增失败'));
+        showError(message || t('新增失败'));
       }
     } catch (e) {
       showError(t('请求失败'));
@@ -226,13 +229,14 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
           const res = await API.post(
             `/api/subscription/admin/user_subscriptions/${subId}/invalidate`,
           );
-          if (res.data?.success) {
-            const msg = res.data?.data?.message;
+          const { success, message, data } = res?.data || {};
+          if (success) {
+            const msg = data?.message;
             showSuccess(msg ? msg : t('已作废'));
             await loadUserSubscriptions();
             onSuccess?.();
           } else {
-            showError(res.data?.message || t('操作失败'));
+            showError(message || t('操作失败'));
           }
         } catch (e) {
           showError(t('请求失败'));
@@ -252,13 +256,14 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
           const res = await API.delete(
             `/api/subscription/admin/user_subscriptions/${subId}`,
           );
-          if (res.data?.success) {
-            const msg = res.data?.data?.message;
+          const { success, message, data } = res?.data || {};
+          if (success) {
+            const msg = data?.message;
             showSuccess(msg ? msg : t('已删除'));
             await loadUserSubscriptions();
             onSuccess?.();
           } else {
-            showError(res.data?.message || t('删除失败'));
+            showError(message || t('删除失败'));
           }
         } catch (e) {
           showError(t('请求失败'));
@@ -374,7 +379,7 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
         },
       },
     ];
-  }, [t, planTitleMap]);
+  }, [t, planInfoMap]);
 
   return (
     <SideSheet

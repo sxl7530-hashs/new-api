@@ -27,6 +27,7 @@ import SettingsLog from '../../pages/Setting/Operation/SettingsLog';
 import SettingsMonitoring from '../../pages/Setting/Operation/SettingsMonitoring';
 import SettingsCreditLimit from '../../pages/Setting/Operation/SettingsCreditLimit';
 import SettingsCheckin from '../../pages/Setting/Operation/SettingsCheckin';
+import SettingsChannelRouting from '../../pages/Setting/Operation/SettingsChannelRouting';
 import { API, showError, toBoolean } from '../../helpers';
 
 const OperationSetting = () => {
@@ -78,6 +79,7 @@ const OperationSetting = () => {
     'checkin_setting.enabled': false,
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,
+    ChannelGroupRoutingConfig: '',
 
     /* 令牌设置 */
     'token_setting.max_user_tokens': 1000,
@@ -86,21 +88,25 @@ const OperationSetting = () => {
   let [loading, setLoading] = useState(false);
 
   const getOptions = async () => {
-    const res = await API.get('/api/option/');
-    const { success, message, data } = res.data;
-    if (success) {
-      let newInputs = {};
-      data.forEach((item) => {
-        if (typeof inputs[item.key] === 'boolean') {
-          newInputs[item.key] = toBoolean(item.value);
-        } else {
-          newInputs[item.key] = item.value;
-        }
-      });
+    try {
+      const res = await API.get('/api/option/');
+      const { success, message, data } = res?.data || {};
+      if (success && Array.isArray(data)) {
+        let newInputs = {};
+        data.forEach((item) => {
+          if (typeof inputs[item.key] === 'boolean') {
+            newInputs[item.key] = toBoolean(item.value);
+          } else {
+            newInputs[item.key] = item.value;
+          }
+        });
 
-      setInputs(newInputs);
-    } else {
-      showError(message);
+        setInputs((prev) => ({ ...prev, ...newInputs }));
+      } else {
+        showError(message || '加载配置失败');
+      }
+    } catch (error) {
+      showError(error);
     }
   };
   async function onRefresh() {
@@ -153,6 +159,10 @@ const OperationSetting = () => {
         {/* 签到设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsCheckin options={inputs} refresh={onRefresh} />
+        </Card>
+        {/* 分组路由策略 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsChannelRouting options={inputs} refresh={onRefresh} />
         </Card>
       </Spin>
     </>

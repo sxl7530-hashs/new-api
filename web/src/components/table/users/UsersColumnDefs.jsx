@@ -67,6 +67,7 @@ const renderRole = (role, t) => {
  * Render username with remark
  */
 const renderUsername = (text, record) => {
+  record = record || {};
   const remark = record.remark;
   if (!remark) {
     return <span>{text}</span>;
@@ -96,6 +97,7 @@ const renderUsername = (text, record) => {
  * Render user statistics
  */
 const renderStatistics = (text, record, showEnableDisableModal, t) => {
+  record = record || {};
   const isDeleted = record.DeletedAt !== null;
 
   // Determine tag text & color like original status column
@@ -135,6 +137,7 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
 
 // Render separate quota usage column
 const renderQuotaUsage = (text, record, t) => {
+  record = record || {};
   const { Paragraph } = Typography;
   const used = parseInt(record.used_quota) || 0;
   const remain = parseInt(record.quota) || 0;
@@ -174,6 +177,7 @@ const renderQuotaUsage = (text, record, t) => {
  * Render invite information
  */
 const renderInviteInfo = (text, record, t) => {
+  record = record || {};
   return (
     <div>
       <Space spacing={1}>

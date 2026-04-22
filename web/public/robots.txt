@@ -1,3 +1,21 @@
 # https://www.robotstxt.org/robotstxt.html
 User-agent: *
-Disallow:
+Allow: /
+Disallow: /console/
+Disallow: /api/
+Disallow: /oauth/
+Disallow: /setup
+Disallow: /user/reset
+Disallow: /reset
+Disallow: /login
+Disallow: /register
+
+# Allow all public marketing pages
+Allow: /about
+Allow: /faq
+Allow: /pricing
+Allow: /user-agreement
+Allow: /privacy-policy
+
+# 提示搜索引擎抓取站点地图（由应用部署域名替换）
+Sitemap: /sitemap.xml

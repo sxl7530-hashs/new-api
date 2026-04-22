@@ -21,6 +21,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const defaultChannelScoreSampleSize = 20
+
 type OpenAIModel struct {
 	ID         string         `json:"id"`
 	Object     string         `json:"object"`
@@ -58,6 +60,20 @@ func parseStatusFilter(statusParam string) int {
 		return 0
 	default:
 		return -1
+	}
+}
+
+func injectChannelScores(channels []*model.Channel) {
+	if len(channels) == 0 {
+		return
+	}
+
+	scores := model.GetChannelDisplayScores(channels, defaultChannelScoreSampleSize)
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		channel.Score = scores[channel.Id]
 	}
 }
 
@@ -147,6 +163,7 @@ func GetAllChannels(c *gin.Context) {
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
+	injectChannelScores(channelData)
 
 	countQuery := model.DB.Model(&model.Channel{})
 	if statusFilter == common.ChannelStatusEnabled {
@@ -253,7 +270,48 @@ func SearchChannels(c *gin.Context) {
 	statusFilter := parseStatusFilter(statusParam)
 	idSort, _ := strconv.ParseBool(c.Query("id_sort"))
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
+	typeParam := c.Query("type")
+	typeFilter := -1
+	if typeParam != "" {
+		if tp, err := strconv.Atoi(typeParam); err == nil {
+			typeFilter = tp
+		}
+	}
+	parseScoreFilter := func(raw string) (*float64, bool) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil, false
+		}
+		score, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return nil, false
+		}
+		return &score, true
+	}
+	minScore, hasMinScore := parseScoreFilter(c.Query("min_score"))
+	maxScore, hasMaxScore := parseScoreFilter(c.Query("max_score"))
+	if hasMinScore && hasMaxScore && *maxScore < *minScore {
+		minScore, maxScore = maxScore, minScore
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
 	channelData := make([]*model.Channel, 0)
+	total := int64(0)
+	typeCounts := map[int64]int64{}
+
+	calcTypeCounts := func(channels []*model.Channel) {
+		for _, channel := range channels {
+			typeCounts[int64(channel.Type)]++
+		}
+	}
+
 	if enableTagMode {
 		tags, err := model.SearchTags(keyword, group, modelKeyword, idSort)
 		if err != nil {
@@ -266,24 +324,15 @@ func SearchChannels(c *gin.Context) {
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
 				tagChannel, err := model.GetChannelsByTag(*tag, idSort, false)
-				if err == nil {
-					channelData = append(channelData, tagChannel...)
+				if err != nil {
+					continue
+				}
+				for _, ch := range tagChannel {
+					channelData = append(channelData, ch)
 				}
 			}
 		}
-	} else {
-		channels, err := model.SearchChannels(keyword, group, modelKeyword, idSort)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
-		channelData = channels
-	}
 
-	if statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
 		filtered := make([]*model.Channel, 0, len(channelData))
 		for _, ch := range channelData {
 			if statusFilter == common.ChannelStatusEnabled && ch.Status != common.ChannelStatusEnabled {
@@ -292,65 +341,76 @@ func SearchChannels(c *gin.Context) {
 			if statusFilter == 0 && ch.Status == common.ChannelStatusEnabled {
 				continue
 			}
+			if typeFilter >= 0 && ch.Type != typeFilter {
+				continue
+			}
 			filtered = append(filtered, ch)
 		}
-		channelData = filtered
-	}
-
-	// calculate type counts for search results
-	typeCounts := make(map[int64]int64)
-	for _, channel := range channelData {
-		typeCounts[int64(channel.Type)]++
-	}
-
-	typeParam := c.Query("type")
-	typeFilter := -1
-	if typeParam != "" {
-		if tp, err := strconv.Atoi(typeParam); err == nil {
-			typeFilter = tp
-		}
-	}
-
-	if typeFilter >= 0 {
-		filtered := make([]*model.Channel, 0, len(channelData))
-		for _, ch := range channelData {
-			if ch.Type == typeFilter {
-				filtered = append(filtered, ch)
+		injectChannelScores(filtered)
+		if minScore != nil || maxScore != nil {
+			ranged := make([]*model.Channel, 0, len(filtered))
+			for _, ch := range filtered {
+				if ch == nil {
+					continue
+				}
+				if minScore != nil && ch.Score < *minScore {
+					continue
+				}
+				if maxScore != nil && ch.Score > *maxScore {
+					continue
+				}
+				ranged = append(ranged, ch)
 			}
+			filtered = ranged
 		}
+		calcTypeCounts(filtered)
+		total = int64(len(filtered))
 		channelData = filtered
+
+		startIdx := (page - 1) * pageSize
+		if startIdx > int(total) {
+			startIdx = int(total)
+		}
+		endIdx := startIdx + pageSize
+		if endIdx > int(total) {
+			endIdx = int(total)
+		}
+		channelData = channelData[startIdx:endIdx]
+	} else {
+		channels, count, counts, err := model.SearchChannelsWithScoreRange(
+			keyword,
+			group,
+			modelKeyword,
+			statusFilter,
+			typeFilter,
+			minScore,
+			maxScore,
+			idSort,
+			page,
+			pageSize,
+		)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		channelData = channels
+		total = count
+		typeCounts = counts
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	if page < 1 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 20
-	}
-
-	total := len(channelData)
-	startIdx := (page - 1) * pageSize
-	if startIdx > total {
-		startIdx = total
-	}
-	endIdx := startIdx + pageSize
-	if endIdx > total {
-		endIdx = total
-	}
-
-	pagedData := channelData[startIdx:endIdx]
-
-	for _, datum := range pagedData {
+	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
+	injectChannelScores(channelData)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"items":       pagedData,
+			"items":       channelData,
 			"total":       total,
 			"type_counts": typeCounts,
 		},

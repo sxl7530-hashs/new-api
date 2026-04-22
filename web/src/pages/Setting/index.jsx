@@ -26,6 +26,7 @@ import {
   Calculator,
   Gauge,
   Shapes,
+  Palette,
   Cog,
   MoreHorizontal,
   LayoutDashboard,
@@ -51,6 +52,15 @@ const Setting = () => {
   const location = useLocation();
   const [tabActiveKey, setTabActiveKey] = useState('1');
   let panes = [];
+  if (!isRoot()) {
+    return (
+      <div className='mt-[60px] px-2'>
+        <div className='p-4 bg-white rounded-lg shadow-sm border border-gray-200'>
+          {t('当前账号无系统设置权限，请使用 Root 账号登录')}
+        </div>
+      </div>
+    );
+  }
 
   if (isRoot()) {
     panes.push({

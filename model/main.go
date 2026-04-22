@@ -1,9 +1,11 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +67,8 @@ var DB *gorm.DB
 
 var LOG_DB *gorm.DB
 
+var dbUnavailableTimeout = getDBUnavailableTimeout()
+
 func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
@@ -124,6 +128,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 			// Use PostgreSQL
 			common.SysLog("using PostgreSQL as database")
+			dsn = ensurePostgresTimeout(dsn)
 			if !isLog {
 				common.UsingPostgreSQL = true
 			} else {
@@ -149,14 +154,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		}
 		// Use MySQL
 		common.SysLog("using MySQL as database")
-		// check parseTime
-		if !strings.Contains(dsn, "parseTime") {
-			if strings.Contains(dsn, "?") {
-				dsn += "&parseTime=true"
-			} else {
-				dsn += "?parseTime=true"
-			}
-		}
+		dsn = ensureMySQLTimeout(dsn)
 		if !isLog {
 			common.UsingMySQL = true
 		} else {
@@ -189,6 +187,11 @@ func InitDB() (err error) {
 		}
 		sqlDB, err := DB.DB()
 		if err != nil {
+			return err
+		}
+		pingContext, cancel := context.WithTimeout(context.Background(), dbUnavailableTimeout)
+		defer cancel()
+		if err := sqlDB.PingContext(pingContext); err != nil {
 			return err
 		}
 		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
@@ -229,6 +232,11 @@ func InitLogDB() (err error) {
 		}
 		sqlDB, err := LOG_DB.DB()
 		if err != nil {
+			return err
+		}
+		pingContext, cancel := context.WithTimeout(context.Background(), dbUnavailableTimeout)
+		defer cancel()
+		if err := sqlDB.PingContext(pingContext); err != nil {
 			return err
 		}
 		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
@@ -676,31 +684,117 @@ func checkMySQLChineseSupport(db *gorm.DB) error {
 }
 
 var (
-	lastPingTime time.Time
-	pingMutex    sync.Mutex
+	lastPingTime    time.Time
+	lastPingError   error
+	pingFailureTime time.Time
+	pingMutex      sync.Mutex
 )
 
 func PingDB() error {
 	pingMutex.Lock()
 	defer pingMutex.Unlock()
 
-	if time.Since(lastPingTime) < time.Second*10 {
+	now := time.Now()
+	if lastPingTime.IsZero() == false && time.Since(lastPingTime) < time.Second*10 && lastPingError == nil {
 		return nil
+	}
+	if lastPingError != nil && now.Sub(pingFailureTime) < dbUnavailableTimeout {
+		return lastPingError
 	}
 
 	sqlDB, err := DB.DB()
 	if err != nil {
 		log.Printf("Error getting sql.DB from GORM: %v", err)
+		lastPingError = err
+		pingFailureTime = now
 		return err
 	}
 
-	err = sqlDB.Ping()
+	pingContext, cancel := context.WithTimeout(context.Background(), dbUnavailableTimeout)
+	defer cancel()
+	err = sqlDB.PingContext(pingContext)
 	if err != nil {
 		log.Printf("Error pinging DB: %v", err)
+		lastPingError = err
+		pingFailureTime = now
 		return err
 	}
 
 	lastPingTime = time.Now()
+	lastPingError = nil
 	common.SysLog("Database pinged successfully")
 	return nil
+}
+
+func GetDatabasePingState() map[string]any {
+	pingMutex.Lock()
+	defer pingMutex.Unlock()
+
+	state := map[string]any{
+		"checked":      false,
+		"connected":    true,
+		"last_ping_at": nil,
+		"last_error":   "",
+		"retry_in_sec": int64(0),
+		"timeout_sec":  int64(dbUnavailableTimeout.Seconds()),
+	}
+
+	if lastPingError != nil {
+		state["connected"] = false
+		state["last_error"] = lastPingError.Error()
+		state["checked"] = true
+		state["last_ping_at"] = lastPingTime.Unix()
+		if !pingFailureTime.IsZero() {
+			retryIn := dbUnavailableTimeout - time.Since(pingFailureTime)
+			if retryIn > 0 {
+				state["retry_in_sec"] = int64(retryIn.Seconds())
+			}
+		}
+		return state
+	}
+
+	state["checked"] = true
+	state["last_ping_at"] = lastPingTime.Unix()
+	return state
+}
+
+func getDBUnavailableTimeout() time.Duration {
+	raw := os.Getenv("DB_UNAVAILABLE_TIMEOUT")
+	if strings.TrimSpace(raw) == "" {
+		return 30 * time.Second
+	}
+	if parsed, err := time.ParseDuration(raw); err == nil {
+		return parsed
+	}
+	if seconds, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+		return time.Duration(seconds) * time.Second
+	}
+	return 30 * time.Second
+}
+
+func ensureMySQLTimeout(dsn string) string {
+	dsn = ensureDSNParam(dsn, "parseTime", "true", true)
+	dsn = ensureDSNParam(dsn, "timeout", "30s", true)
+	dsn = ensureDSNParam(dsn, "readTimeout", "30s", true)
+	dsn = ensureDSNParam(dsn, "writeTimeout", "30s", true)
+	return dsn
+}
+
+func ensurePostgresTimeout(dsn string) string {
+	return ensureDSNParam(dsn, "connect_timeout", "30", false)
+}
+
+func ensureDSNParam(dsn string, key string, value string, queryStyle bool) string {
+	if strings.Contains(dsn, key+"=") {
+		return dsn
+	}
+	keyValue := key + "=" + value
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	if !queryStyle && !strings.Contains(dsn, "?") && strings.Contains(dsn, " ") {
+		return dsn + " " + keyValue
+	}
+	return dsn + sep + keyValue
 }
