@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { lazy, Suspense, useContext, useMemo } from 'react';
+import React, { lazy, Suspense, useContext, useEffect, useMemo } from 'react';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
@@ -51,6 +51,110 @@ const About = lazy(() => import('./pages/About'));
 const UserAgreement = lazy(() => import('./pages/UserAgreement'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 
+const PAGE_SEO_META = {
+  '/': {
+    title: 'new-api - AI 网关聚合与分发平台',
+    description:
+      '统一的 AI 模型聚合与分发网关，支持 OpenAI、Claude、Gemini 兼容接口，提供个人与企业级模型管理与调用能力。',
+    keywords:
+      'new-api, AI 网关, OpenAI 兼容, Claude 兼容, Gemini 兼容, LLM 聚合, API Gateway',
+    ogDescription:
+      '统一的 AI 模型聚合与分发网关，支持 OpenAI、Claude、Gemini 兼容接口。',
+    noindex: false,
+  },
+  '/pricing': {
+    title: '定价 - new-api AI 模型网关',
+    description:
+      '查看 new-api AI 网关的定价方案与套餐，支持多模型接入与弹性额度管理。',
+    keywords: 'new-api 定价, AI 网关 套餐, 额度套餐',
+    ogDescription: '查看 new-api AI 网关的定价与额度方案。',
+    noindex: false,
+  },
+  '/about': {
+    title: '关于 new-api - AI 模型网关平台',
+    description:
+      '了解 new-api 的 AI 模型聚合能力、OpenAI/Claude/Gemini 兼容方案以及项目设计目标。',
+    keywords: 'new-api 关于, AI 网关 平台介绍, API 聚合',
+    ogDescription: '了解 new-api 的能力定位与平台设计目标。',
+    noindex: false,
+  },
+  '/user-agreement': {
+    title: '用户协议 - new-api',
+    description: 'new-api 用户协议。',
+    keywords: 'new-api 用户协议, 服务条款',
+    ogDescription: '查看 new-api 用户协议与使用规则。',
+    noindex: false,
+  },
+  '/privacy-policy': {
+    title: '隐私政策 - new-api',
+    description: 'new-api 隐私政策。',
+    keywords: 'new-api 隐私政策, 数据保护',
+    ogDescription: '查看 new-api 隐私政策及数据处理说明。',
+    noindex: false,
+  },
+};
+
+const toCanonicalPath = (path) => {
+  if (!path || path === '/') {
+    return '/';
+  }
+  return path.replace(/\/+$/, '') || '/';
+};
+
+const syncMetaTag = (selector, attributes) => {
+  const existing = document.querySelector(selector);
+  if (!existing) {
+    const tag = document.createElement(
+      selector.startsWith('link[') ? 'link' : 'meta',
+    );
+    Object.entries(attributes).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        tag.setAttribute(key, value);
+      }
+    });
+    document.head.appendChild(tag);
+    return;
+  }
+  Object.entries(attributes).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      existing.setAttribute(key, value);
+    }
+  });
+};
+
+const getPageSeoMeta = (pathname) => {
+  if (PAGE_SEO_META[pathname]) {
+    return PAGE_SEO_META[pathname];
+  }
+
+  if (
+    pathname === '/forbidden' ||
+    pathname === '/setup' ||
+    pathname === '/setup/' ||
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/reset' ||
+    pathname === '/user/reset' ||
+    pathname.startsWith('/oauth/') ||
+    pathname.startsWith('/console')
+  ) {
+    return {
+      title: 'new-api',
+      description: 'new-api - AI 模型网关聚合与分发平台。',
+      keywords: 'new-api, AI 网关',
+      noindex: true,
+    };
+  }
+
+  return {
+    title: 'new-api',
+    description:
+      '统一的 AI 模型聚合与分发网关，支持 OpenAI、Claude、Gemini 兼容接口。',
+    keywords: 'new-api, AI 网关, LLM',
+    noindex: true,
+  };
+};
+
 function DynamicOAuth2Callback() {
   const { provider } = useParams();
   return <OAuth2Callback type={provider} />;
@@ -81,6 +185,52 @@ function App() {
     }
     return false; // 默认不需要登录
   }, [statusState?.status?.HeaderNavModules]);
+
+  useEffect(() => {
+    const meta = getPageSeoMeta(location.pathname);
+    const robots = meta.noindex ? 'noindex,nofollow' : 'index,follow';
+    const canonical = `${window.location.origin}${toCanonicalPath(
+      location.pathname,
+    )}`;
+
+    document.title = meta.title;
+    syncMetaTag('meta[name="description"]', {
+      name: 'description',
+      content: meta.description,
+    });
+    syncMetaTag('meta[name="keywords"]', {
+      name: 'keywords',
+      content: meta.keywords,
+    });
+    syncMetaTag('meta[name="robots"]', {
+      name: 'robots',
+      content: robots,
+    });
+    syncMetaTag('link[rel="canonical"]', {
+      rel: 'canonical',
+      href: canonical,
+    });
+    syncMetaTag('meta[property="og:title"]', {
+      property: 'og:title',
+      content: meta.title,
+    });
+    syncMetaTag('meta[property="og:description"]', {
+      property: 'og:description',
+      content: meta.ogDescription || meta.description,
+    });
+    syncMetaTag('meta[property="og:url"]', {
+      property: 'og:url',
+      content: canonical,
+    });
+    syncMetaTag('meta[name="twitter:title"]', {
+      name: 'twitter:title',
+      content: meta.title,
+    });
+    syncMetaTag('meta[name="twitter:description"]', {
+      name: 'twitter:description',
+      content: meta.ogDescription || meta.description,
+    });
+  }, [location.pathname]);
 
   return (
     <SetupCheck>
