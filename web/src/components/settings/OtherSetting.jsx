@@ -48,12 +48,32 @@ const OtherSetting = () => {
     Footer: '',
     About: '',
     HomePageContent: '',
+    UpdateRepositoryURL: 'https://github.com/sxl7530-hashs/new-api',
+    UpdateBranch: 'main',
+    SelfUpdatePostCommand: '',
+    SelfUpdateServiceName: '',
   });
   let [loading, setLoading] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [statusState, statusDispatch] = useContext(StatusContext);
   const [updateData, setUpdateData] = useState({
-    tag_name: '',
+    repository_url: '',
+    branch: '',
+    current_commit: '',
+    remote_commit: '',
+    remote_message: '',
+    remote_date: '',
+    remote_url: '',
+    current_version: '',
+    can_update: false,
+    has_update: false,
+    dirty: false,
+    git_available: false,
+    git_repository: false,
+    post_command_configured: false,
+    restart_mode: '',
+    restart_command: '',
+    auto_restart_available: false,
     content: '',
   });
 
@@ -82,6 +102,8 @@ const OtherSetting = () => {
     About: false,
     Footer: false,
     CheckUpdate: false,
+    SaveUpdateConfig: false,
+    ApplyUpdate: false,
   });
   const handleInputChange = async (value, e) => {
     const name = e.target.id;
@@ -234,37 +256,22 @@ const OtherSetting = () => {
         ...loadingInput,
         CheckUpdate: true,
       }));
-      // Use a CORS proxy to avoid direct cross-origin requests to GitHub API
-      // Option 1: Use a public CORS proxy service
-      // const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
-      // const res = await API.get(
-      //   `${proxyUrl}https://api.github.com/repos/Calcium-Ion/new-api/releases/latest`,
-      // );
-
-      // Option 2: Use the JSON proxy approach which often works better with GitHub API
-      const res = await fetch(
-        'https://api.github.com/repos/Calcium-Ion/new-api/releases/latest',
-        {
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            // Adding User-Agent which is often required by GitHub API
-            'User-Agent': 'new-api-update-checker',
-          },
-        },
-      ).then((response) => response.json());
-
-      // Option 3: Use a local proxy endpoint
-      // Create a cached version of the response to avoid frequent GitHub API calls
-      // const res = await API.get('/api/status/github-latest-release');
-
-      const { tag_name, body } = res;
-      if (tag_name === statusState?.status?.version) {
-        showSuccess(`已是最新版本：${tag_name}`);
+      const res = await API.get('/api/option/update/check');
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message);
+        return;
+      }
+      if (!data?.has_update) {
+        showSuccess(
+          data?.current_commit
+            ? `当前已经是最新提交：${data.current_commit.slice(0, 7)}`
+            : `当前已经是最新版本：${data?.current_version || t('未知')}`,
+        );
       } else {
         setUpdateData({
-          tag_name: tag_name,
-          content: marked.parse(body),
+          ...data,
+          content: marked.parse(data?.remote_message || ''),
         });
         setShowUpdateModal(true);
       }
@@ -276,6 +283,51 @@ const OtherSetting = () => {
         ...loadingInput,
         CheckUpdate: false,
       }));
+    }
+  };
+
+  const saveUpdateConfig = async () => {
+    try {
+      setLoadingInput((prev) => ({ ...prev, SaveUpdateConfig: true }));
+      await updateOption('UpdateRepositoryURL', inputs.UpdateRepositoryURL);
+      await updateOption('UpdateBranch', inputs.UpdateBranch);
+      await updateOption('SelfUpdatePostCommand', inputs.SelfUpdatePostCommand);
+      await updateOption('SelfUpdateServiceName', inputs.SelfUpdateServiceName);
+      showSuccess(t('更新设置已保存'));
+    } catch (error) {
+      console.error('保存更新设置失败', error);
+      showError(t('保存更新设置失败'));
+    } finally {
+      setLoadingInput((prev) => ({ ...prev, SaveUpdateConfig: false }));
+    }
+  };
+
+  const applyUpdate = async () => {
+    try {
+      setLoadingInput((prev) => ({ ...prev, ApplyUpdate: true }));
+      const res = await API.post('/api/option/update/apply');
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message);
+        return;
+      }
+      setUpdateData((prev) => ({
+        ...prev,
+        current_commit: data?.after_commit || prev.current_commit,
+        can_update: false,
+        has_update: false,
+        content: marked.parse((data?.logs || []).join('\n\n')),
+      }));
+      showSuccess(
+        data?.restart_triggered
+          ? t('更新完成，已执行更新后命令')
+          : t('更新完成，如为二进制或容器部署，请按你的部署方式重启服务'),
+      );
+    } catch (error) {
+      console.error('执行一键更新失败', error);
+      showError(t('执行一键更新失败'));
+    } finally {
+      setLoadingInput((prev) => ({ ...prev, ApplyUpdate: false }));
     }
   };
   const getOptions = async () => {
@@ -300,12 +352,11 @@ const OtherSetting = () => {
     getOptions();
   }, []);
 
-  // Function to open GitHub release page
-  const openGitHubRelease = () => {
-    window.open(
-      `https://github.com/Calcium-Ion/new-api/releases/tag/${updateData.tag_name}`,
-      '_blank',
-    );
+  const openUpdateSource = () => {
+    const target =
+      updateData.remote_url ||
+      `${inputs.UpdateRepositoryURL.replace(/\.git$/, '')}/commits/${inputs.UpdateBranch}`;
+    window.open(target, '_blank');
   };
 
   const getStartTimeString = () => {
@@ -343,6 +394,42 @@ const OtherSetting = () => {
                       {t('检查更新')}
                     </Button>
                   </Space>
+                </Col>
+              </Row>
+              <Row style={{ marginTop: 12 }}>
+                <Col span={16}>
+                  <Form.Input
+                    label={t('更新仓库地址')}
+                    placeholder='https://github.com/sxl7530-hashs/new-api'
+                    field={'UpdateRepositoryURL'}
+                    onChange={handleInputChange}
+                  />
+                  <Form.Input
+                    label={t('更新分支')}
+                    placeholder='main'
+                    field={'UpdateBranch'}
+                    onChange={handleInputChange}
+                  />
+                  <Form.Input
+                    label={t('更新后执行命令')}
+                    placeholder={t(
+                      '可选，例如：docker compose up -d --build 或 systemctl restart new-api',
+                    )}
+                    field={'SelfUpdatePostCommand'}
+                    onChange={handleInputChange}
+                  />
+                  <Form.Input
+                    label={t('systemd 服务名')}
+                    placeholder='new-api'
+                    field={'SelfUpdateServiceName'}
+                    onChange={handleInputChange}
+                  />
+                  <Button
+                    onClick={saveUpdateConfig}
+                    loading={loadingInput['SaveUpdateConfig']}
+                  >
+                    {t('保存更新设置')}
+                  </Button>
                 </Col>
               </Row>
               <Row>
@@ -499,22 +586,72 @@ const OtherSetting = () => {
         </Form>
       </Col>
       <Modal
-        title={t('新版本') + '：' + updateData.tag_name}
+        title={t('发现可用更新')}
         visible={showUpdateModal}
         onCancel={() => setShowUpdateModal(false)}
         footer={[
           <Button
+            key='apply'
+            type='warning'
+            loading={loadingInput['ApplyUpdate']}
+            disabled={!updateData.can_update}
+            onClick={async () => {
+              await applyUpdate();
+            }}
+          >
+            {t('一键更新')}
+          </Button>,
+          <Button
             key='details'
             type='primary'
             onClick={() => {
-              setShowUpdateModal(false);
-              openGitHubRelease();
+              openUpdateSource();
             }}
           >
             {t('详情')}
           </Button>,
         ]}
       >
+        <div style={{ marginBottom: 12 }}>
+          <div>
+            {t('当前版本')}：{updateData.current_version || t('未知')}
+          </div>
+          <div>
+            {t('当前提交')}：
+            {updateData.current_commit
+              ? updateData.current_commit.slice(0, 12)
+              : t('未知')}
+          </div>
+          <div>
+            {t('远端提交')}：
+            {updateData.remote_commit
+              ? updateData.remote_commit.slice(0, 12)
+              : t('未知')}
+          </div>
+          <div>
+            {t('更新分支')}：{updateData.branch || inputs.UpdateBranch}
+          </div>
+          <div>
+            {t('工作区状态')}：
+            {updateData.dirty ? t('存在未提交修改，不能自动更新') : t('干净')}
+          </div>
+          <div>
+            {t('自动更新能力')}：
+            {!updateData.git_available
+              ? t('系统未安装 git')
+              : !updateData.git_repository
+                ? t('当前运行目录不是 Git 仓库')
+                : updateData.can_update
+                  ? t('可执行一键更新')
+                  : t('暂不可自动更新')}
+          </div>
+          <div>
+            {t('自动重启方式')}：
+            {updateData.restart_mode
+              ? `${updateData.restart_mode} / ${updateData.restart_command}`
+              : t('未识别到自动重启命令')}
+          </div>
+        </div>
         <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>
       </Modal>
     </Row>
