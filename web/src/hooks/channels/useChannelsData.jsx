@@ -1026,6 +1026,9 @@ export const useChannelsData = () => {
       if (stream) {
         query.set('stream', 'true');
       }
+      if (record?.name) {
+        query.set('name', record.name);
+      }
       const queryString = query.toString();
       const url = `/api/channel/test/${channelId}${
         queryString ? `?${queryString}` : ''

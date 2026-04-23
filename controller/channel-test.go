@@ -32,6 +32,7 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
+	"gorm.io/gorm"
 
 	"github.com/gin-gonic/gin"
 )
@@ -733,18 +734,48 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 }
 
 func TestChannel(c *gin.Context) {
-	channelId, err := strconv.Atoi(c.Param("id"))
+	rawChannelId := strings.TrimSpace(c.Param("id"))
+	channelId, err := strconv.Atoi(rawChannelId)
 	if err != nil {
-		common.ApiError(c, err)
-		return
+		channelName := strings.TrimSpace(c.Query("name"))
+		if channelName == "" {
+			common.ApiError(c, err)
+			return
+		}
+		channelFallback := &model.Channel{}
+		if err = model.DB.Where("name = ?", channelName).First(channelFallback).Error; err == nil {
+			channelId = channelFallback.Id
+		} else {
+			common.ApiError(c, err)
+			return
+		}
 	}
+	channelName := strings.TrimSpace(c.Query("name"))
 	channel, err := model.CacheGetChannel(channelId)
 	if err != nil {
 		channel, err = model.GetChannelById(channelId, true)
 		if err != nil {
-			common.ApiError(c, err)
-			return
+			if channelName != "" && errors.Is(err, gorm.ErrRecordNotFound) {
+				channelFallback := &model.Channel{}
+				if fallbackErr := model.DB.Where("name = ?", channelName).First(channelFallback).Error; fallbackErr == nil {
+					channel = channelFallback
+				} else {
+					common.ApiError(c, err)
+					return
+				}
+			} else {
+				common.ApiError(c, err)
+				return
+			}
 		}
+	}
+	if channel.Id > 0 && channelId != channel.Id {
+		channelId = channel.Id
+	}
+
+	if channel == nil {
+		common.ApiError(c, gorm.ErrRecordNotFound)
+		return
 	}
 	//defer func() {
 	//	if channel.ChannelInfo.IsMultiKey {
