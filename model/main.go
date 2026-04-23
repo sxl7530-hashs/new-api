@@ -173,7 +173,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 }
 
 func InitDB() (err error) {
-	db, err := chooseDB("SQL_DSN", false)
+	db, err := initDatabaseConnection("SQL_DSN")
 	if err == nil {
 		if common.DebugEnabled {
 			db = db.Debug()
@@ -207,9 +207,8 @@ func InitDB() (err error) {
 		common.SysLog("database migration started")
 		err = migrateDB()
 		return err
-	} else {
-		common.FatalLog(err)
 	}
+	common.FatalLog(err)
 	return err
 }
 
@@ -218,7 +217,7 @@ func InitLogDB() (err error) {
 		LOG_DB = DB
 		return
 	}
-	db, err := chooseDB("LOG_SQL_DSN", true)
+	db, err := initDatabaseConnection("LOG_SQL_DSN")
 	if err == nil {
 		if common.DebugEnabled {
 			db = db.Debug()
@@ -249,10 +248,58 @@ func InitLogDB() (err error) {
 		common.SysLog("database migration started")
 		err = migrateLOGDB()
 		return err
-	} else {
-		common.FatalLog(err)
 	}
+	common.FatalLog(err)
 	return err
+}
+
+func initDatabaseConnection(envName string) (*gorm.DB, error) {
+	db, err := chooseDB(envName, envName == "LOG_SQL_DSN")
+	if err != nil {
+		return nil, err
+	}
+
+	maxRetries := common.GetEnvOrDefault("DB_INIT_RETRIES", 10)
+	retryIntervalSeconds := common.GetEnvOrDefault("DB_INIT_RETRY_INTERVAL_SECONDS", 2)
+	if maxRetries < 1 {
+		maxRetries = 1
+	}
+	if retryIntervalSeconds < 1 {
+		retryIntervalSeconds = 1
+	}
+
+	dbType := envName
+	for i := 1; i <= maxRetries; i++ {
+		sqlDB, innerErr := db.DB()
+		if innerErr != nil {
+			err = innerErr
+		} else {
+			pingContext, cancel := context.WithTimeout(context.Background(), dbUnavailableTimeout)
+			if pingErr := sqlDB.PingContext(pingContext); pingErr != nil {
+				err = pingErr
+				cancel()
+			} else {
+				cancel()
+				sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
+				sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+				sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+				return db, nil
+			}
+		}
+
+		if i >= maxRetries {
+			return nil, err
+		}
+
+		common.SysError(fmt.Sprintf("database connection not ready for %s (attempt %d/%d), retrying in %ds, error: %s", dbType, i, maxRetries, retryIntervalSeconds, err.Error()))
+		time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
+		db, err = chooseDB(envName, envName == "LOG_SQL_DSN")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, err
 }
 
 func migrateDB() error {
@@ -687,7 +734,7 @@ var (
 	lastPingTime    time.Time
 	lastPingError   error
 	pingFailureTime time.Time
-	pingMutex      sync.Mutex
+	pingMutex       sync.Mutex
 )
 
 func PingDB() error {

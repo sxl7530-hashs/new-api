@@ -16,6 +16,7 @@ Options:
   -e, --env-file PATH    Optional local .env file to upload to remote /opt/new-api/.env
   -u, --public-url URL    Public URL for post-deploy health check, e.g. https://newapi.example.com
   -n, --skip-build       Skip local build steps (assume ./new-api and web/dist already prepared)
+  --skip-db-check        Allow SQL_DSN=local/empty (for local sqlite only)
   --skip-healthcheck     Skip post-deploy remote health check
   -h, --help             Show this help
 
@@ -35,6 +36,7 @@ BACKUP_DIR="$REMOTE_DIR/releases"
 ENV_FILE=""
 SKIP_BUILD="false"
 RELEASE_NAME=""
+SKIP_DB_CHECK="false"
 
 BINARY_NAME="${BINARY_NAME:-new-api}"
 SERVICE_NAME="${SERVICE_NAME:-new-api}"
@@ -63,6 +65,8 @@ while [[ $# -gt 0 ]]; do
       PUBLIC_URL="$2"; shift 2;;
     -n|--skip-build)
       SKIP_BUILD="true"; shift;;
+    --skip-db-check)
+      SKIP_DB_CHECK="true"; shift;;
     --skip-healthcheck)
       SKIP_HEALTHCHECK="true"; shift;;
     -h|--help)
@@ -144,6 +148,7 @@ REMOTE_RELEASE_DIR="$REMOTE_RELEASE_DIR"
 ARCHIVE="/tmp/new-api-release-${TIMESTAMP}.tar.gz"
 BINARY_NAME="$BINARY_NAME"
 SERVICE_NAME="$SERVICE_NAME"
+SKIP_DB_CHECK="$SKIP_DB_CHECK"
 
 mkdir -p "\$REMOTE_DIR" "\$BACKUP_DIR" "\$REMOTE_DIR/logs" "\$REMOTE_DIR/data"
 
@@ -178,6 +183,28 @@ if [[ -f "${REMOTE_DIR}/.env" ]]; then
   : 
 elif [[ -f "${REMOTE_RELEASE_DIR}/.env" ]]; then
   mv "${REMOTE_RELEASE_DIR}/.env" "${REMOTE_DIR}/.env"
+fi
+
+if [[ "${SKIP_DB_CHECK}" != "true" ]]; then
+  if [[ ! -f "${REMOTE_DIR}/.env" ]]; then
+    echo "ERROR: ${REMOTE_DIR}/.env not found. SQL_DSN check cannot be completed."
+    echo "If this is a local sqlite deployment, rerun with --skip-db-check."
+    exit 1
+  fi
+
+  SQL_DSN_VALUE="$(grep -E '^SQL_DSN=' "${REMOTE_DIR}/.env" | tail -n 1 | cut -d= -f2- | sed -e 's/[[:space:]]//g' || true)"
+  SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE}"
+  SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM#\"}"
+  SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM%\"}"
+  SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM#\'}"
+  SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM%\'}"
+
+  if [[ -z "$SQL_DSN_VALUE_NORM" || "${SQL_DSN_VALUE_NORM,,}" == "local" ]]; then
+    echo "ERROR: SQL_DSN must be set and not local for remote deployment."
+    echo "Current SQL_DSN value in ${REMOTE_DIR}/.env: \"${SQL_DSN_VALUE}\""
+    echo "If this is intentionally a local sqlite deployment, rerun with --skip-db-check."
+    exit 1
+  fi
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
