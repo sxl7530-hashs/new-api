@@ -14,7 +14,9 @@ Options:
   -r, --release-dir NAME Name of release folder timestamp (default: generated)
   -b, --backup-dir PATH  Remote backup dir for previous binary/dist (default: /opt/new-api/releases)
   -e, --env-file PATH    Optional local .env file to upload to remote /opt/new-api/.env
+  -u, --public-url URL    Public URL for post-deploy health check, e.g. https://newapi.example.com
   -n, --skip-build       Skip local build steps (assume ./new-api and web/dist already prepared)
+  --skip-healthcheck     Skip post-deploy remote health check
   -h, --help             Show this help
 
 Env vars:
@@ -38,6 +40,10 @@ BINARY_NAME="${BINARY_NAME:-new-api}"
 SERVICE_NAME="${SERVICE_NAME:-new-api}"
 LOCAL_BINARY="/tmp/${BINARY_NAME}"
 LOCAL_RELEASE_ARCHIVE=""
+SKIP_HEALTHCHECK="false"
+PUBLIC_URL=""
+TARGET_GOOS="${TARGET_GOOS:-linux}"
+TARGET_GOARCH="${TARGET_GOARCH:-amd64}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,8 +59,12 @@ while [[ $# -gt 0 ]]; do
       BACKUP_DIR="$2"; shift 2;;
     -e|--env-file)
       ENV_FILE="$2"; shift 2;;
+    -u|--public-url)
+      PUBLIC_URL="$2"; shift 2;;
     -n|--skip-build)
       SKIP_BUILD="true"; shift;;
+    --skip-healthcheck)
+      SKIP_HEALTHCHECK="true"; shift;;
     -h|--help)
       usage
       exit 0;;
@@ -99,7 +109,7 @@ if [[ "$SKIP_BUILD" != "true" ]]; then
   cd "$LOCAL_ROOT"
 
   echo "[3/6] Build backend..."
-  CGO_ENABLED=0 go build -o "$LOCAL_BINARY" .
+  GOOS="$TARGET_GOOS" GOARCH="$TARGET_GOARCH" CGO_ENABLED=0 go build -o "$LOCAL_BINARY" .
 else
   if [[ ! -f "$LOCAL_BINARY" ]] || [[ ! -d "web/dist" ]]; then
     echo "ERROR: SKIP_BUILD enabled but binary or web/dist missing"
@@ -190,3 +200,10 @@ popd >/dev/null
 
 rm -f "$LOCAL_RELEASE_ARCHIVE"
 echo "Deploy done. Remote release: $REMOTE_RELEASE_DIR"
+if [[ "$SKIP_HEALTHCHECK" != "true" ]]; then
+  if [[ -n "$PUBLIC_URL" ]]; then
+    bash scripts/remote-healthcheck.sh -H "$HOST" -d "$REMOTE_DIR" -s "$SERVICE_NAME" -u "$PUBLIC_URL"
+  else
+    bash scripts/remote-healthcheck.sh -H "$HOST" -d "$REMOTE_DIR" -s "$SERVICE_NAME"
+  fi
+fi
