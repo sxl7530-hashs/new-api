@@ -132,6 +132,14 @@ export const useChannelsData = () => {
     searchScoreMax: '',
   };
 
+  const normalizeChannelId = (id) => {
+    const parsedId = Number.parseInt(`${id}`.trim(), 10);
+    if (Number.isNaN(parsedId) || !Number.isFinite(parsedId) || parsedId <= 0) {
+      return NaN;
+    }
+    return parsedId;
+  };
+
   const buildScoreQuery = ({ searchScoreRange, searchScoreMin, searchScoreMax }) => {
     const minFromInput = parseFloat(searchScoreMin);
     const maxFromInput = parseFloat(searchScoreMax);
@@ -278,6 +286,8 @@ export const useChannelsData = () => {
       channels[i].upstreamUpdateMeta = parseUpstreamUpdateMeta(
         channels[i].settings,
       );
+      const normalizedId = normalizeChannelId(channels[i].id);
+      channels[i].id = Number.isNaN(normalizedId) ? channels[i].id : normalizedId;
       channels[i].key = '' + channels[i].id;
       if (!enableTagMode) {
         channelDates.push(channels[i]);
@@ -702,18 +712,34 @@ export const useChannelsData = () => {
   const updateChannelProperty = (channelId, updateFn) => {
     const newChannels = [...channels];
     let updated = false;
+    const normalizedTargetId = normalizeChannelId(channelId);
+    const compareRawTargetId = String(channelId ?? '');
 
     newChannels.forEach((channel) => {
       if (channel.children !== undefined) {
         channel.children.forEach((child) => {
-          if (child.id === channelId) {
+          const childId = normalizeChannelId(child.id);
+          if (
+            (!Number.isNaN(normalizedTargetId) &&
+              !Number.isNaN(childId) &&
+              childId === normalizedTargetId) ||
+            (Number.isNaN(normalizedTargetId) && String(child.id) === compareRawTargetId)
+          ) {
             updateFn(child);
             updated = true;
           }
         });
-      } else if (channel.id === channelId) {
-        updateFn(channel);
-        updated = true;
+      } else {
+        const currentId = normalizeChannelId(channel.id);
+        if (
+          (!Number.isNaN(normalizedTargetId) &&
+            !Number.isNaN(currentId) &&
+            currentId === normalizedTargetId) ||
+          (Number.isNaN(normalizedTargetId) && String(channel.id) === compareRawTargetId)
+        ) {
+          updateFn(channel);
+          updated = true;
+        }
       }
     });
 
@@ -972,7 +998,14 @@ export const useChannelsData = () => {
     endpointType = '',
     stream = false,
   ) => {
-    const testKey = `${record.id}-${model}`;
+    const channelId = normalizeChannelId(record?.id);
+    if (Number.isNaN(channelId)) {
+      showError(
+        t('渠道ID非法，暂不支持测试，请刷新后重试，或重新加载该渠道记录。'),
+      );
+      return;
+    }
+    const testKey = `${channelId}-${model}`;
 
     // 检查是否应该停止批量测试
     if (shouldStopBatchTestingRef.current && isBatchTesting) {
@@ -983,13 +1016,20 @@ export const useChannelsData = () => {
     setTestingModels((prev) => new Set([...prev, model]));
 
     try {
-      let url = `/api/channel/test/${record.id}?model=${model}`;
+      const query = new URLSearchParams();
+      if (model) {
+        query.set('model', model);
+      }
       if (endpointType) {
-        url += `&endpoint_type=${endpointType}`;
+        query.set('endpoint_type', endpointType);
       }
       if (stream) {
-        url += `&stream=true`;
+        query.set('stream', 'true');
       }
+      const queryString = query.toString();
+      const url = `/api/channel/test/${channelId}${
+        queryString ? `?${queryString}` : ''
+      }`;
       const res = await API.get(url);
 
       // 检查是否在请求期间被停止
@@ -1013,7 +1053,7 @@ export const useChannelsData = () => {
 
       if (success) {
         // 更新渠道响应时间
-        updateChannelProperty(record.id, (channel) => {
+        updateChannelProperty(channelId, (channel) => {
           channel.response_time = time * 1000;
           channel.test_time = Date.now() / 1000;
         });
@@ -1039,7 +1079,7 @@ export const useChannelsData = () => {
       }
     } catch (error) {
       // 处理网络错误
-      const testKey = `${record.id}-${model}`;
+      const testKey = `${channelId}-${model}`;
       setModelTestResults((prev) => ({
         ...prev,
         [testKey]: {
@@ -1067,6 +1107,11 @@ export const useChannelsData = () => {
       showError(t('渠道模型信息不完整'));
       return;
     }
+    const batchChannelId = normalizeChannelId(currentTestChannel.id);
+    if (Number.isNaN(batchChannelId)) {
+      showError(t('该渠道ID非法，无法进行批量测试。'));
+      return;
+    }
 
     const models = currentTestChannel.models
       .split(',')
@@ -1086,7 +1131,7 @@ export const useChannelsData = () => {
     setModelTestResults((prev) => {
       const newResults = { ...prev };
       models.forEach((model) => {
-        const testKey = `${currentTestChannel.id}-${model}`;
+        const testKey = `${batchChannelId}-${model}`;
         delete newResults[testKey];
       });
       return newResults;
@@ -1121,7 +1166,7 @@ export const useChannelsData = () => {
 
         const batchPromises = batch.map((model) =>
           testChannel(
-            currentTestChannel,
+            { ...currentTestChannel, id: batchChannelId },
             model,
             selectedEndpointType,
             isStreamTest,
@@ -1152,7 +1197,7 @@ export const useChannelsData = () => {
           let failCount = 0;
 
           models.forEach((model) => {
-            const testKey = `${currentTestChannel.id}-${model}`;
+            const testKey = `${batchChannelId}-${model}`;
             const result = currentResults[testKey];
             if (result && result.success) {
               successCount++;
