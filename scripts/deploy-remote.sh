@@ -138,25 +138,24 @@ echo "[5/6] Upload release package..."
 scp "$LOCAL_RELEASE_ARCHIVE" "${HOST}:/tmp/new-api-release-${TIMESTAMP}.tar.gz"
 
 echo "[6/6] Remote deploy + reload..."
-ssh "$HOST" "bash -s" <<EOF
+ssh "$HOST" "SKIP_DB_CHECK='$SKIP_DB_CHECK' \
+BINARY_NAME='$BINARY_NAME' \
+SERVICE_NAME='$SERVICE_NAME' \
+REMOTE_DIR='$REMOTE_DIR' \
+BACKUP_DIR='$BACKUP_DIR' \
+RELEASE_NAME='$RELEASE_NAME' \
+REMOTE_RELEASE_DIR='$REMOTE_RELEASE_DIR' \
+ARCHIVE='/tmp/new-api-release-${TIMESTAMP}.tar.gz' \
+bash -s" <<'EOF'
 set -euo pipefail
 
-REMOTE_DIR="$REMOTE_DIR"
-BACKUP_DIR="$BACKUP_DIR"
-RELEASE_NAME="$RELEASE_NAME"
-REMOTE_RELEASE_DIR="$REMOTE_RELEASE_DIR"
-ARCHIVE="/tmp/new-api-release-${TIMESTAMP}.tar.gz"
-BINARY_NAME="$BINARY_NAME"
-SERVICE_NAME="$SERVICE_NAME"
-SKIP_DB_CHECK="$SKIP_DB_CHECK"
+mkdir -p "$REMOTE_DIR" "$BACKUP_DIR" "$REMOTE_DIR/logs" "$REMOTE_DIR/data"
 
-mkdir -p "\$REMOTE_DIR" "\$BACKUP_DIR" "\$REMOTE_DIR/logs" "\$REMOTE_DIR/data"
+mkdir -p "$REMOTE_RELEASE_DIR"
+tar -xzf "$ARCHIVE" -C "$REMOTE_RELEASE_DIR"
+chmod +x "$REMOTE_RELEASE_DIR/$BINARY_NAME"
 
-mkdir -p "\$REMOTE_RELEASE_DIR"
-tar -xzf "\$ARCHIVE" -C "\$REMOTE_RELEASE_DIR"
-chmod +x "\$REMOTE_RELEASE_DIR/\$BINARY_NAME"
-
-cat > /tmp/new-api.service.$$ <<'UNIT'
+cat > /tmp/new-api.service.$$ <<UNIT
 [Unit]
 Description=New API
 After=network.target
@@ -164,20 +163,20 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=${REMOTE_DIR}/current
-EnvironmentFile=${REMOTE_DIR}/.env
-ExecStart=${REMOTE_DIR}/current/${BINARY_NAME}
+WorkingDirectory=$REMOTE_DIR/current
+EnvironmentFile=$REMOTE_DIR/.env
+ExecStart=$REMOTE_DIR/current/$BINARY_NAME
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
-StandardOutput=append:${REMOTE_DIR}/logs/new-api.log
-StandardError=append:${REMOTE_DIR}/logs/new-api.err
+StandardOutput=append:$REMOTE_DIR/logs/new-api.log
+StandardError=append:$REMOTE_DIR/logs/new-api.err
 
 [Install]
 WantedBy=multi-user.target
 UNIT
 
-ln -sfn "\$REMOTE_RELEASE_DIR" "${REMOTE_DIR}/current"
+ln -sfn "$REMOTE_RELEASE_DIR" "${REMOTE_DIR}/current"
 
 if [[ -f "${REMOTE_DIR}/.env" ]]; then
   : 
@@ -185,14 +184,15 @@ elif [[ -f "${REMOTE_RELEASE_DIR}/.env" ]]; then
   mv "${REMOTE_RELEASE_DIR}/.env" "${REMOTE_DIR}/.env"
 fi
 
+SKIP_DB_CHECK="${SKIP_DB_CHECK:-false}"
 if [[ "${SKIP_DB_CHECK}" != "true" ]]; then
+  SQL_DSN_VALUE=""
   if [[ ! -f "${REMOTE_DIR}/.env" ]]; then
-    echo "ERROR: ${REMOTE_DIR}/.env not found. SQL_DSN check cannot be completed."
-    echo "If this is a local sqlite deployment, rerun with --skip-db-check."
-    exit 1
+    echo "WARN: ${REMOTE_DIR}/.env not found, skip SQL_DSN strict check (local sqlite or first-time bootstrap)."
+  else
+    SQL_DSN_VALUE="$(grep -E '^SQL_DSN=' "${REMOTE_DIR}/.env" | tail -n 1 | cut -d= -f2- | sed -e 's/[[:space:]]//g' || true)"
+    SQL_DSN_VALUE="${SQL_DSN_VALUE:-}"
   fi
-
-  SQL_DSN_VALUE="$(grep -E '^SQL_DSN=' "${REMOTE_DIR}/.env" | tail -n 1 | cut -d= -f2- | sed -e 's/[[:space:]]//g' || true)"
   SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE}"
   SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM#\"}"
   SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM%\"}"
@@ -208,19 +208,19 @@ if [[ "${SKIP_DB_CHECK}" != "true" ]]; then
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-  mv /tmp/new-api.service.$$ /etc/systemd/system/\${SERVICE_NAME}.service
+  mv /tmp/new-api.service.$$ "/etc/systemd/system/${SERVICE_NAME}.service"
   systemctl daemon-reload
-  systemctl enable \${SERVICE_NAME}
-  systemctl restart \${SERVICE_NAME}
-  systemctl status \${SERVICE_NAME} --no-pager -l
+  systemctl enable "${SERVICE_NAME}"
+  systemctl restart "${SERVICE_NAME}"
+  systemctl status "${SERVICE_NAME}" --no-pager -l
 else
   pkill -f "${REMOTE_DIR}/current/${BINARY_NAME}" || true
   nohup "${REMOTE_DIR}/current/${BINARY_NAME}" >>"${REMOTE_DIR}/logs/new-api.log" 2>>"${REMOTE_DIR}/logs/new-api.err" &
   echo "service manager not found, process started by nohup"
 fi
 
-rm -f "\$ARCHIVE"
-rm -f /tmp/new-api.service.\$\$
+rm -f "$ARCHIVE"
+rm -f /tmp/new-api.service.$$
 EOF
 
 popd >/dev/null
