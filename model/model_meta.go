@@ -2,6 +2,7 @@ package model
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -43,7 +44,33 @@ type Model struct {
 	MatchedCount  int      `json:"matched_count,omitempty" gorm:"-"`
 }
 
+func normalizeModelMetadata(mi *Model) {
+	if mi == nil {
+		return
+	}
+
+	mi.Description = strings.TrimSpace(mi.Description)
+
+	tagItems := make(map[string]struct{})
+	tags := strings.Split(mi.Tags, ",")
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		normalizedTag := strings.TrimSpace(tag)
+		if normalizedTag == "" {
+			continue
+		}
+		if _, exists := tagItems[normalizedTag]; exists {
+			continue
+		}
+		tagItems[normalizedTag] = struct{}{}
+		normalized = append(normalized, normalizedTag)
+	}
+	mi.Tags = strings.Join(normalized, ",")
+}
+
 func (mi *Model) Insert() error {
+	normalizeModelMetadata(mi)
+
 	now := common.GetTimestamp()
 	mi.CreatedTime = now
 	mi.UpdatedTime = now
@@ -74,6 +101,8 @@ func IsModelNameDuplicated(id int, name string) (bool, error) {
 }
 
 func (mi *Model) Update() error {
+	normalizeModelMetadata(mi)
+
 	mi.UpdatedTime = common.GetTimestamp()
 	// 使用 Select 强制更新所有字段，包括零值
 	return DB.Model(&Model{}).Where("id = ?", mi.Id).

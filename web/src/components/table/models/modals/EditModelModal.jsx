@@ -74,6 +74,31 @@ const EditModelModal = (props) => {
   const [tagGroups, setTagGroups] = useState([]);
   const [endpointGroups, setEndpointGroups] = useState([]);
 
+  const normalizeDescription = (value) => (value ?? '').toString().trim();
+  const normalizeTags = (value) => {
+    if (Array.isArray(value)) {
+      return [
+        ...new Set(
+          value
+            .flatMap((tag) => (tag ? String(tag).split(',') : []))
+            .map((tag) => String(tag).trim())
+            .filter(Boolean),
+        ),
+      ];
+    }
+    if (!value) {
+      return [];
+    }
+    return [
+      ...new Set(
+        String(value)
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      ),
+    ];
+  };
+
   // 获取供应商列表
   const fetchVendors = async () => {
     try {
@@ -114,9 +139,9 @@ const EditModelModal = (props) => {
 
   const getInitValues = () => ({
     model_name: props.editingModel?.model_name || '',
-    description: '',
+    description: normalizeDescription(props.editingModel?.description),
     icon: '',
-    tags: [],
+    tags: normalizeTags(props.editingModel?.tags),
     vendor_id: undefined,
     vendor: '',
     vendor_icon: '',
@@ -138,12 +163,8 @@ const EditModelModal = (props) => {
       const res = await API.get(`/api/models/${props.editingModel.id}`);
       const { success, message, data } = res.data;
       if (success) {
-        // 处理tags
-        if (data.tags) {
-          data.tags = data.tags.split(',').filter(Boolean);
-        } else {
-          data.tags = [];
-        }
+        data.description = normalizeDescription(data.description);
+        data.tags = normalizeTags(data.tags);
         // endpoints 保持原始 JSON 字符串，若为空设为空串
         if (!data.endpoints) {
           data.endpoints = '';
@@ -194,7 +215,8 @@ const EditModelModal = (props) => {
     try {
       const submitData = {
         ...values,
-        tags: Array.isArray(values.tags) ? values.tags.join(',') : values.tags,
+        description: normalizeDescription(values.description),
+        tags: normalizeTags(values.tags).join(','),
         endpoints: values.endpoints || '',
         status: values.status ? 1 : 0,
         sync_official: values.sync_official ? 1 : 0,

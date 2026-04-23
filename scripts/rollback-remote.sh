@@ -57,16 +57,31 @@ if [[ ! -d "\${REMOTE_DIR}/releases" ]]; then
   exit 1
 fi
 
+CURRENT_RELEASE_NAME=""
+if [[ -L "\${REMOTE_DIR}/current" ]]; then
+  CURRENT_RELEASE_NAME="\$(basename "\$(readlink "\${REMOTE_DIR}/current" 2>/dev/null || true)")"
+fi
+
 if [[ -n "\$TARGET_RELEASE" ]]; then
   RELEASE_DIR="\${REMOTE_DIR}/releases/\${TARGET_RELEASE}"
 else
-  # pick latest by lexicographic sort (timestamp style release names)
-  RELEASE_DIR="\$(ls -1 \${REMOTE_DIR}/releases | sort | tail -n 2 | head -n 1)"
+  # pick previous release by current pointer first, then fallback to latest-but-one
+  if [[ -n "\$CURRENT_RELEASE_NAME" ]]; then
+    RELEASES_SORTED="\$(ls -1 \${REMOTE_DIR}/releases | sort)"
+    PREV_RELEASE_NAME="\$(echo \"\$RELEASES_SORTED\" | awk -v cur=\"\$CURRENT_RELEASE_NAME\" 'BEGIN {found=0} {if(found==1) {print; exit}} \$0==cur {found=1}')"
+    if [[ -z "\$PREV_RELEASE_NAME" ]]; then
+      PREV_RELEASE_NAME="\$(echo \"\$RELEASES_SORTED\" | sort | head -n 1)"
+    fi
+    RELEASE_NAME_SELECTED="\$PREV_RELEASE_NAME"
+  else
+    # fallback: pick latest two by timestamp and use older one as rollback target
+    RELEASE_NAME_SELECTED="\$(ls -1 \${REMOTE_DIR}/releases | sort | tail -n 2 | head -n 1)"
+  fi
+  RELEASE_DIR="\${REMOTE_DIR}/releases/\${RELEASE_NAME_SELECTED}"
   if [[ -z "\$RELEASE_DIR" ]]; then
     echo "ERROR: no releases found"
     exit 1
   fi
-  RELEASE_DIR="\${REMOTE_DIR}/releases/\${RELEASE_DIR}"
 fi
 
 if [[ ! -d "\$RELEASE_DIR" ]]; then

@@ -60,7 +60,7 @@ const ModelsFilters = ({
           <Form.Input
             field='searchKeyword'
             prefix={<IconSearch />}
-            placeholder={t('搜索模型名称')}
+            placeholder={t('搜索模型名称/描述/标签')}
             showClear
             pure
             size='small'
