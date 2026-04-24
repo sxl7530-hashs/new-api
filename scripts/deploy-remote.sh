@@ -54,6 +54,13 @@ SKIP_HEALTHCHECK="false"
 PUBLIC_URL=""
 TARGET_GOOS="${TARGET_GOOS:-linux}"
 TARGET_GOARCH="${TARGET_GOARCH:-amd64}"
+SSH_OPTS=(
+  -o BatchMode=yes
+  -o ServerAliveInterval=15
+  -o ServerAliveCountMax=3
+  -o StrictHostKeyChecking=accept-new
+)
+export COPYFILE_DISABLE=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -118,7 +125,7 @@ if [[ ! "$HEALTHCHECK_INTERVAL" =~ ^[0-9]+$ ]] || [[ "$HEALTHCHECK_INTERVAL" -lt
   exit 1
 fi
 
-PREVIOUS_RELEASE_NAME="$(ssh "$HOST" "if command -v readlink >/dev/null 2>&1; then basename \$(readlink ${REMOTE_DIR}/current 2>/dev/null || true); fi")"
+PREVIOUS_RELEASE_NAME="$(ssh "${SSH_OPTS[@]}" "$HOST" "if command -v readlink >/dev/null 2>&1; then basename \$(readlink ${REMOTE_DIR}/current 2>/dev/null || true); fi")"
 
 TIMESTAMP="${RELEASE_NAME:-$(date +%Y%m%d%H%M%S)}"
 RELEASE_DIR="/tmp/new-api-release-${TIMESTAMP}"
@@ -132,6 +139,11 @@ command -v bun >/dev/null || { echo "ERROR: bun not found"; exit 1; }
 command -v rsync >/dev/null || { echo "ERROR: rsync not found"; exit 1; }
 command -v ssh >/dev/null || { echo "ERROR: ssh not found"; exit 1; }
 command -v scp >/dev/null || { echo "ERROR: scp not found"; exit 1; }
+
+REMOTE_HAS_RSYNC="false"
+if ssh "${SSH_OPTS[@]}" "$HOST" "command -v rsync >/dev/null 2>&1"; then
+  REMOTE_HAS_RSYNC="true"
+fi
 
 pushd "$LOCAL_ROOT" >/dev/null
 
@@ -160,15 +172,24 @@ cp -R web/dist "$RELEASE_DIR/web/"
 if [[ -n "$ENV_FILE" ]]; then
   cp "$ENV_FILE" "$RELEASE_DIR/.env"
 fi
+find "$RELEASE_DIR" -name '._*' -delete
 tar -czf "$LOCAL_RELEASE_ARCHIVE" -C "$RELEASE_DIR" .
 
 rm -rf "$RELEASE_DIR"
 
 echo "[5/6] Upload release package..."
-scp "$LOCAL_RELEASE_ARCHIVE" "${HOST}:/tmp/new-api-release-${TIMESTAMP}.tar.gz"
+if [[ "$REMOTE_HAS_RSYNC" == "true" ]]; then
+  rsync -az --progress -e "ssh ${SSH_OPTS[*]}" \
+    "$LOCAL_RELEASE_ARCHIVE" \
+    "${HOST}:/tmp/new-api-release-${TIMESTAMP}.tar.gz"
+else
+  scp -O "${SSH_OPTS[@]}" \
+    "$LOCAL_RELEASE_ARCHIVE" \
+    "${HOST}:/tmp/new-api-release-${TIMESTAMP}.tar.gz"
+fi
 
 echo "[6/6] Remote deploy + reload..."
-ssh "$HOST" "SKIP_DB_CHECK='$SKIP_DB_CHECK' \
+ssh "${SSH_OPTS[@]}" "$HOST" "SKIP_DB_CHECK='$SKIP_DB_CHECK' \
 BINARY_NAME='$BINARY_NAME' \
 SERVICE_NAME='$SERVICE_NAME' \
 REMOTE_DIR='$REMOTE_DIR' \
@@ -212,11 +233,6 @@ WantedBy=multi-user.target
 UNIT
 
 ln -sfn "$REMOTE_RELEASE_DIR" "${REMOTE_DIR}/current"
-ACTIVE_RELEASE="$(readlink "${REMOTE_DIR}/current")"
-
-if [[ -z "$ACTIVE_RELEASE" ]]; then
-  ACTIVE_RELEASE="${REMOTE_DIR}/current"
-fi
 
 write_status() {
   echo "[$1] $2"
@@ -268,26 +284,43 @@ elif [[ -f "${REMOTE_RELEASE_DIR}/.env" ]]; then
   mv "${REMOTE_RELEASE_DIR}/.env" "${REMOTE_DIR}/.env"
 fi
 
+extract_env_value() {
+  local key="$1"
+  local file="$2"
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+  grep -E "^${key}=" "$file" | tail -n 1 | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
 SKIP_DB_CHECK="${SKIP_DB_CHECK:-false}"
 if [[ "${SKIP_DB_CHECK}" != "true" ]]; then
-  SQL_DSN_VALUE=""
-  if [[ ! -f "${REMOTE_DIR}/.env" ]]; then
-    echo "WARN: ${REMOTE_DIR}/.env not found, skip SQL_DSN strict check (local sqlite or first-time bootstrap)."
-  else
-    SQL_DSN_VALUE="$(grep -E '^SQL_DSN=' "${REMOTE_DIR}/.env" | tail -n 1 | cut -d= -f2- | sed -e 's/[[:space:]]//g' || true)"
-    SQL_DSN_VALUE="${SQL_DSN_VALUE:-}"
-  fi
+  SQL_DSN_VALUE="$(extract_env_value SQL_DSN "${REMOTE_DIR}/.env" || true)"
+  SQLITE_PATH_VALUE="$(extract_env_value SQLITE_PATH "${REMOTE_DIR}/.env" || true)"
   SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE}"
   SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM#\"}"
   SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM%\"}"
   SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM#\'}"
   SQL_DSN_VALUE_NORM="${SQL_DSN_VALUE_NORM%\'}"
+  SQLITE_PATH_VALUE_NORM="${SQLITE_PATH_VALUE}"
+  SQLITE_PATH_VALUE_NORM="${SQLITE_PATH_VALUE_NORM#\"}"
+  SQLITE_PATH_VALUE_NORM="${SQLITE_PATH_VALUE_NORM%\"}"
+  SQLITE_PATH_VALUE_NORM="${SQLITE_PATH_VALUE_NORM#\'}"
+  SQLITE_PATH_VALUE_NORM="${SQLITE_PATH_VALUE_NORM%\'}"
 
-  if [[ -z "$SQL_DSN_VALUE_NORM" || "${SQL_DSN_VALUE_NORM,,}" == "local" ]]; then
-    echo "ERROR: SQL_DSN must be set and not local for remote deployment."
-    echo "Current SQL_DSN value in ${REMOTE_DIR}/.env: \"${SQL_DSN_VALUE}\""
-    echo "If this is intentionally a local sqlite deployment, rerun with --skip-db-check."
-    exit 1
+  if [[ "${SQL_DSN_VALUE_NORM,,}" == "local" ]]; then
+    if [[ -z "$SQLITE_PATH_VALUE_NORM" ]]; then
+      echo "ERROR: SQL_DSN=local but SQLITE_PATH is empty, refuse deploy."
+      exit 1
+    fi
+    write_status "INFO" "detected sqlite deployment: ${SQLITE_PATH_VALUE_NORM}"
+  elif [[ -z "$SQL_DSN_VALUE_NORM" ]]; then
+    if [[ -n "$SQLITE_PATH_VALUE_NORM" ]]; then
+      write_status "INFO" "detected sqlite deployment without SQL_DSN: ${SQLITE_PATH_VALUE_NORM}"
+    else
+      echo "ERROR: neither SQL_DSN nor SQLITE_PATH is configured in ${REMOTE_DIR}/.env"
+      exit 1
+    fi
   fi
   if [[ "$SQL_DSN_VALUE_NORM" == *"<"* || "$SQL_DSN_VALUE_NORM" == *">"* || "$SQL_DSN_VALUE_NORM" == *"你的"* ]]; then
     echo "ERROR: SQL_DSN appears to be placeholder text, refuse deploy."
@@ -296,6 +329,7 @@ if [[ "${SKIP_DB_CHECK}" != "true" ]]; then
   fi
 fi
 
+write_status "INFO" "switch current -> ${REMOTE_RELEASE_DIR}"
 mv /tmp/new-api.service.$$ "/etc/systemd/system/${SERVICE_NAME}.service"
 start_service
 
@@ -328,7 +362,13 @@ if ! wait_api_ready "current" "$PORT"; then
 fi
 
 cleanup_old_releases
-systemctl status "${SERVICE_NAME}" --no-pager -l || true
+if command -v systemctl >/dev/null 2>&1; then
+  if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    write_status "OK" "${SERVICE_NAME} is active"
+  else
+    write_status "WARN" "${SERVICE_NAME} is not active after deploy"
+  fi
+fi
 
 rm -f "$ARCHIVE"
 rm -f /tmp/new-api.service.$$
