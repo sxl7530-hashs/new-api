@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Button,
+  Dropdown,
   Space,
   Tag,
   AvatarGroup,
@@ -85,7 +86,9 @@ const renderStatus = (text, record, t) => {
 
 // Render group column
 const renderGroupColumn = (text, record, t, groupRatios = {}) => {
-  if (text === 'auto') {
+  const normalizedGroup = typeof text === 'string' ? text : '';
+
+  if (normalizedGroup === 'auto') {
     return (
       <Tooltip
         content={t(
@@ -100,11 +103,11 @@ const renderGroupColumn = (text, record, t, groupRatios = {}) => {
       </Tooltip>
     );
   }
-  if (typeof text === 'string' && text.includes(',')) {
+  if (normalizedGroup.includes(',')) {
     return (
       <Tooltip content={t('该令牌会按展示顺序依次尝试这些分组')} position='top'>
         <span className='flex items-center gap-1'>
-          {renderGroup(text)}
+          {renderGroup(normalizedGroup)}
           {record && record.cross_group_retry ? (
             <Tag size='small' color='orange' shape='circle'>
               {t('跨分组')}
@@ -114,10 +117,10 @@ const renderGroupColumn = (text, record, t, groupRatios = {}) => {
       </Tooltip>
     );
   }
-  const ratio = groupRatios[text];
+  const ratio = groupRatios[normalizedGroup];
   return (
     <span className='flex items-center gap-1'>
-      {renderGroup(text)}
+      {renderGroup(normalizedGroup)}
       {ratio !== undefined && (
         <Tag size='small' color='green' shape='circle'>
           {ratio}x
@@ -205,8 +208,10 @@ const renderTokenKey = (
 
 // Render model limits column
 const renderModelLimits = (text, record, t) => {
-  if (record.model_limits_enabled && text) {
-    const models = text.split(',').filter(Boolean);
+  const normalizedLimits = typeof text === 'string' ? text : '';
+
+  if (record.model_limits_enabled && normalizedLimits) {
+    const models = normalizedLimits.split(',').filter(Boolean);
     const categories = getModelCategories(t);
 
     const vendorAvatars = [];
@@ -266,7 +271,9 @@ const renderModelLimits = (text, record, t) => {
 
 // Render IP restrictions column
 const renderAllowIps = (text, t) => {
-  if (!text || text.trim() === '') {
+  const normalizedIps = typeof text === 'string' ? text : '';
+
+  if (!normalizedIps || normalizedIps.trim() === '') {
     return (
       <Tag color='white' shape='circle'>
         {t('无限制')}
@@ -274,7 +281,7 @@ const renderAllowIps = (text, t) => {
     );
   }
 
-  const ips = text
+  const ips = normalizedIps
     .split('\n')
     .map((ip) => ip.trim())
     .filter(Boolean);

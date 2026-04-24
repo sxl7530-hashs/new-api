@@ -274,3 +274,49 @@ func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 		t.Fatalf("unauthorized key response leaked raw token key: %s", unauthorizedRecorder.Body.String())
 	}
 }
+
+func TestAddTokenThenListReturnsRenderableFields(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	_ = db
+
+	body := map[string]any{
+		"name":                 "new-token",
+		"expired_time":         -1,
+		"remain_quota":         0,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"group":                "",
+		"cross_group_retry":    false,
+	}
+
+	addCtx, addRecorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+	AddToken(addCtx)
+
+	addResponse := decodeAPIResponse(t, addRecorder)
+	if !addResponse.Success {
+		t.Fatalf("expected add token success, got message: %s", addResponse.Message)
+	}
+
+	listCtx, listRecorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?p=1&size=10", nil, 1)
+	GetAllTokens(listCtx)
+
+	listResponse := decodeAPIResponse(t, listRecorder)
+	if !listResponse.Success {
+		t.Fatalf("expected list success after add, got message: %s", listResponse.Message)
+	}
+
+	var page tokenPageResponse
+	if err := common.Unmarshal(listResponse.Data, &page); err != nil {
+		t.Fatalf("failed to decode token page after add: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected exactly one token after add, got %d", len(page.Items))
+	}
+	if page.Items[0].Name != "new-token" {
+		t.Fatalf("expected token name %q, got %q", "new-token", page.Items[0].Name)
+	}
+	if page.Items[0].Key == "" {
+		t.Fatalf("expected masked key to be present after add")
+	}
+}
